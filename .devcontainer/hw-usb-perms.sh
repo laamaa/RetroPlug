@@ -13,6 +13,32 @@
 # just makes them usable without sudo and pins the probe's console name).
 set +e
 
+# 0. Hot-pluggable char devices: the N8's USB-serial (ttyACM*, major 166), the NES capture card
+#    (video*, 81) and ALSA (snd/*, 116). devcontainer.json deliberately passes none of them as
+#    --device (a missing node would fail container start), so mirror whatever the host has RIGHT
+#    NOW from sysfs: mknod each present node with its current major:minor, and drop nodes whose
+#    device has gone. Idempotent - re-run after plugging/unplugging hardware.
+sync_class() { # <sysfs class dir> <name glob> <dev dir> <major>
+	local cls=$1 glob=$2 dir=$3 major=$4 t name mm cur
+	sudo mkdir -p "$dir"
+	for t in "$cls"/$glob; do
+		[ -e "$t/dev" ] || continue
+		name=$(basename "$t")
+		mm=$(cat "$t/dev" 2>/dev/null) || continue
+		[ "${mm%:*}" = "$major" ] || continue   # only majors the cgroup rules grant
+		cur=$(stat -c '%t:%T' "$dir/$name" 2>/dev/null)   # hex major:minor
+		[ -n "$cur" ] && [ "$((16#${cur%:*})):$((16#${cur#*:}))" = "$mm" ] && { sudo chmod a+rw "$dir/$name"; continue; }
+		sudo rm -f "$dir/$name"
+		sudo mknod "$dir/$name" c "${mm%:*}" "${mm#*:}" && sudo chmod a+rw "$dir/$name"
+	done
+	for t in "$dir"/$glob; do
+		[ -c "$t" ] && [ ! -e "$cls/$(basename "$t")" ] && sudo rm -f "$t"
+	done
+}
+sync_class /sys/class/tty 'ttyACM*' /dev 166
+sync_class /sys/class/video4linux 'video*' /dev 81
+sync_class /sys/class/sound '*' /dev/snd 116
+
 # 1. Raw USB (usbfs) nodes used by OpenOCD/picotool via libusb.
 sudo chmod -R a+rw /dev/bus/usb 2>/dev/null
 

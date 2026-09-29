@@ -315,3 +315,23 @@ RUN ln -s /workspaces/RetroPlug-main/.devcontainer/wt.sh /usr/local/bin/wt
 # all shells (login and non-login) so `claude` resolves everywhere, not only in
 # interactive terminals where the installer edits the shell rc files.
 ENV PATH="/home/vscode/.local/bin:${PATH}"
+
+# Optional SSH access into this container for tooling on another machine (Orca
+# dials the loopback port published on the Docker host). Inert by default:
+# start-sshd only acts when DEVCONTAINER_SSH_PUBLIC_KEY is set.
+# Host keys are minted per container into /etc/ssh/keys, which devcontainer.json
+# keeps on a volume -- baking them here would give every container built from
+# this image the same identity.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-server \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /run/sshd /etc/ssh/sshd_config.d /etc/ssh/keys \
+ && printf '%s\n' \
+      'PasswordAuthentication no' \
+      'PermitRootLogin no' \
+      'KbdInteractiveAuthentication no' \
+      'HostKey /etc/ssh/keys/ssh_host_ed25519_key' \
+      > /etc/ssh/sshd_config.d/devcontainer-ssh.conf \
+ && rm -f /etc/ssh/ssh_host_*
+COPY start-sshd.sh /usr/local/bin/start-sshd
+RUN chmod +x /usr/local/bin/start-sshd

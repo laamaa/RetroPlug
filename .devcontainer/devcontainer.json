@@ -19,18 +19,25 @@
   // bind mount one level above the repo), so it survives rebuilds without a
   // Docker volume. post-create.sh symlinks ~/.claude and ~/.claude.json to it.
   "containerEnv": {
-    "TZ": "${localEnv:TZ}"
+    "TZ": "${localEnv:TZ}",
+    // Optional SSH access for tooling on another machine; see start-sshd.sh.
+    // Inert unless this is set in the host environment.
+    "DEVCONTAINER_SSH_PUBLIC_KEY": "${localEnv:DEVCONTAINER_SSH_PUBLIC_KEY}"
   },
+  // Published on the Docker host's loopback only, on a port unique to this project.
+  "appPort": ["127.0.0.1:2204:22"],
   // Pass through the physical hardware attached to the host so agents can drive + observe it:
-  //   --device=/dev/ttyACM0          the Everdrive N8 Pro's USB-serial port (VID:PID 38df:0017,
-  //                                  cdc_acm on the host) -> `retroplug-cli n8-bridge`.
-  //   --device=/dev/snd              all ALSA cards, incl. the Zoom L6 (card id "L6"); the 2A03
-  //                                  audio lands on USB capture channels 3-4 -> `arecord -D hw:L6`.
-  //   --device=/dev/video0 / video1  the MacroSilicon USB capture card carrying the NES video feed
-  //                                  (uvcvideo) -> `ffmpeg -f v4l2 -i /dev/video0 ...` frame grabs.
-  // These nodes come in root-owned; postStartCommand opens them to the vscode user. If a device is
-  // absent (e.g. N8 unplugged) the container start fails on the missing --device, so unplugging
-  // means temporarily removing that line + rebuilding.
+  //   /dev/ttyACM0       the Everdrive N8 Pro's USB-serial port (VID:PID 38df:0017, cdc_acm on the
+  //                      host) -> `retroplug-cli n8-bridge`.
+  //   /dev/snd/*         all ALSA cards, incl. the Zoom L6 (card id "L6"); the 2A03 audio lands on
+  //                      USB capture channels 3-4 -> `arecord -D hw:L6`.
+  //   /dev/video0 / 1    the MacroSilicon USB capture card carrying the NES video feed (uvcvideo)
+  //                      -> `ffmpeg -f v4l2 -i /dev/video0 ...` frame grabs.
+  // None of these are `--device` flags: Docker refuses to start a container whose --device node is
+  // missing, and any of this hardware may be unplugged. Instead the device-cgroup rules below grant
+  // the majors (166 tty-ACM, 81 video4linux, 116 ALSA) and hw-usb-perms.sh (postStart) mknods
+  // whatever is plugged in right now from the host's /sys, opened to the vscode user. After
+  // plugging something in later, re-run `bash .devcontainer/hw-usb-perms.sh` - no rebuild.
   //
   // Raw USB passthrough (to flash / drive RP2040 boards such as the Raspberry Pi Debug Probe,
   // VID:PID 2e8a:000c, over SWD with OpenOCD): bind-mount the whole /dev/bus/usb tree + grant the
@@ -49,18 +56,17 @@
     "--shm-size=512m",
     "--ulimit",
     "memlock=-1:-1",
-    "--device=/dev/ttyACM0",
-    "--device=/dev/snd",
-    "--device=/dev/video0",
-    "--device=/dev/video1",
-    "--mount=type=bind,source=/dev/bus/usb,target=/dev/bus/usb",
+    //"--mount=type=bind,source=/dev/bus/usb,target=/dev/bus/usb",
     "--mount=type=bind,source=/sys/kernel/debug,target=/sys/kernel/debug",
     "--cap-add=SYS_ADMIN",
     "--device-cgroup-rule=c 189:* rmw",
-    "--device-cgroup-rule=c 166:* rmw"
+    "--device-cgroup-rule=c 166:* rmw",
+    "--device-cgroup-rule=c 81:* rmw",
+    "--device-cgroup-rule=c 116:* rmw"
   ],
+  "mounts": ["source=retroplug-sshd-keys,target=/etc/ssh/keys,type=volume"],
   "postCreateCommand": "bash .devcontainer/post-create.sh",
-  "postStartCommand": "sudo chmod a+rw /dev/ttyACM0 /dev/video0 /dev/video1 2>/dev/null; sudo chmod -R a+rw /dev/snd 2>/dev/null; bash .devcontainer/hw-usb-perms.sh 2>/dev/null; true",
+  "postStartCommand": "bash .devcontainer/hw-usb-perms.sh 2>/dev/null; true; sudo -E /usr/local/bin/start-sshd vscode",
   "customizations": {
     "vscode": {
       "extensions": [
