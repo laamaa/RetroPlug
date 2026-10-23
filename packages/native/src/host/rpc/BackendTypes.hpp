@@ -85,4 +85,5 @@ struct BackendConstructSpec {
     // .sav resolution; only the loaded bytes differ. Honoured by the SameBoy backend (GB-only feature).
     std::optional<rfl::Bytestring> romBytes;
     std::optional<std::string>               settings;  // backend "system"-role config JSON (construct-time)
+    std::optional<std::uint32_t> warmupMs; // cold boot only, before handoff
 };

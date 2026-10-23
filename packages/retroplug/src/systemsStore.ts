@@ -30,6 +30,7 @@ import {
 import { type CommonSettings, DEFAULT_COMMON_SETTINGS, clampGain, commonSettingsSchema } from "./systemSettings";
 import type { RoleRegistry, RoleInstance } from "./systemRoles";
 import { blipToasterChip, needsChipLabelScan, BLIPTOASTER_CHIP_SCAN_LEN } from "./bliptoaster/romDetect";
+import { isRisaResolvedSeekRom, risaReadyStatus } from "./risa/romDetect";
 import { roleConfigForNative, LsdjSyncMode } from "./settingsEnums";
 
 // How much ROM header to read for the role providers (title lives at 0x134).
@@ -335,7 +336,8 @@ export class SystemsStore {
     const src = findById(this.entries, id);
     if (!src) return null;
     const override = savPathOverride ?? src.savPath;
-    const systemRole = src.roles.find((r) => r.kind === src.core);
+    const roles = this.withDerivedRoleFacts(src.roles, src.romPath, src.embeddedRom);
+    const systemRole = roles.find((r) => r.kind === src.core);
     const newId = allocSystemId();
     // Route through the load-time role hooks too, so a reload re-applies e.g. LSDj asset overrides
     // (the patched effective ROM) — not just the fresh-load path.
@@ -350,10 +352,10 @@ export class SystemsStore {
       stateBytes: seed.stateBytes,
       replaceId: id,
       settings: systemRole ? JSON.stringify(roleConfigForNative(systemRole.kind, systemRole.config)) : undefined,
-    }, src.roles);
+    }, roles);
     const ok = this.backend.constructSystem(spec, newId);
     if (!ok) return null;
-    this.entries = replaceById(this.entries, id, { ...src, id: newId, savPath: override });
+    this.entries = replaceById(this.entries, id, { ...src, roles, id: newId, savPath: override });
     if (this.focusedId === id) this.focusedId = newId;
     return this.committed(newId);
   }
@@ -770,7 +772,7 @@ export class SystemsStore {
    *  re-derived at every build instead of being serialized - the difference is only that these live
    *  inside a role config, so they cannot simply be left out of the file.
    *
-   *  Today that is exactly one field: `bliptoaster.chip`, which expansion build the ROM is. It decides
+   *  These include `risa-sync.resolvedSeek` and `bliptoaster.chip`, which expansion build the ROM is. The latter decides
    *  which CC set the DAW parameter map exposes (parameterMap.ts), and overwriting it repairs the two
    *  cases a stored value gets wrong: a project written before the field existed (which would read as
    *  the 2A03 core and silently show none of the expansion lanes), and a ROM swapped for a different
@@ -780,6 +782,17 @@ export class SystemsStore {
    *  Also the repair path for a project stored while the chip was read off the ambiguous mapper: an S5B
    *  ROM saved then reads back as "2a03", and re-deriving from the deeper prefix corrects it in place. */
   private withDerivedRoleFacts(roles: RoleInstance[], romPath: string, embeddedRom: string): RoleInstance[] {
+    // Seek capability belongs to the ROM, not the saved project's choices.
+    // Repair older projects and ROM swaps in both directions.
+    if (romPath && !embeddedRom && roles.some((r) => r.kind === "risa-sync")) {
+      const header = readRoleHeader(this.backend, "nes", romPath);
+      const resolvedSeek = isRisaResolvedSeekRom(header);
+      const ready = risaReadyStatus(header);
+      roles = roles.map((r) => r.kind === "risa-sync" &&
+        (resolvedSeek || r.config.resolvedSeek !== undefined)
+        ? { ...r, config: { ...r.config, resolvedSeek,
+            prepareAddress: ready?.prepareAddress, generationAddress: ready?.generationAddress } } : r);
+    }
     const i = roles.findIndex((r) => r.kind === "bliptoaster");
     if (i < 0 || !romPath || embeddedRom) return roles;
 

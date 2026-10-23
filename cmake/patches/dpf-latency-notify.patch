@@ -1,0 +1,10 @@
+--- a/distrho/src/DistrhoPluginVST3.cpp
++++ b/distrho/src/DistrhoPluginVST3.cpp
+@@ -3021,6 +3021,7 @@
+         if (fLastKnownLatency != latency)
+         {
+             fLastKnownLatency = latency;
++            fCachedParameterValues[kVst3InternalParameterLatency] = latency;
+
+             normalized = plainParameterToNormalized(kVst3InternalParameterLatency,
+                                                     fCachedParameterValues[kVst3InternalParameterLatency]);

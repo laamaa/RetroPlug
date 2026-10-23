@@ -24,6 +24,29 @@ import { registerRomProviders } from "../../src/romProviders";
 import { buildAppRegistry } from "../../src/appHost";
 import { gbRom, lsdjRom, blipToasterRom } from "./fixtures";
 
+test("Risa seek capability follows the current ROM across saved-project loads", () => {
+  for (const capable of [false, true]) {
+    const { be, store } = newStore();
+    const rom = new Uint8Array(0x4000);
+    rom.set([0x4e, 0x45, 0x53, 0x1a, 1, 0, 0x52, 8, 0, 0, 0xa0]);
+    rom.set(new TextEncoder().encode(capable ? "RISA251RSEEK1" : "RISA230"), 0x10);
+    be.seed("/roms/risa.nes", rom);
+    const id = store.adopt({ romPath: "/roms/risa.nes", core: "mesen", roles: [
+      { kind: "mesen", config: {} },
+      { kind: "risa-sync", config: { resolvedSeek: !capable } },
+    ] });
+    expect(id !== null).toBe(true);
+    const sync = store.view().find((v) => v.id === id)!.roles.find((r) => r.kind === "risa-sync")!;
+    expect(sync.config.resolvedSeek).toBe(capable);
+    rom.fill(0, 0x10, 0x30);
+    rom.set(new TextEncoder().encode(capable ? "RISA230" : "RISA251RSEEK1"), 0x10);
+    be.seed("/roms/risa.nes", rom);
+    const reloaded = store.reloadSystem(id!);
+    const next = store.view().find((v) => v.id === reloaded)!.roles.find((r) => r.kind === "risa-sync")!;
+    expect(next.config.resolvedSeek).toBe(!capable);
+  }
+});
+
 function newStore() {
   const be = new MockBackend("/cfg");
   const reg = new RoleRegistry();

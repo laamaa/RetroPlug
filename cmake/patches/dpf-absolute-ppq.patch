@@ -1,0 +1,94 @@
+--- a/distrho/DistrhoDetails.hpp
++++ b/distrho/DistrhoDetails.hpp
+@@ -967,6 +967,10 @@
+     */
+     uint64_t frame;
+
++   /** Absolute host musical position in quarter notes, independent of BBT meter. */
++    double quarterNotes = 0.0;
++    bool quarterNotesValid = false;
++
+    /**
+       Bar-Beat-Tick time position.
+     */
+@@ -1071,6 +1075,8 @@
+     {
+         playing  = false;
+         frame = 0;
++        quarterNotes = 0.0;
++        quarterNotesValid = false;
+         bbt.clear();
+     }
+ };
+--- a/distrho/src/DistrhoPluginVST2.cpp
++++ b/distrho/src/DistrhoPluginVST2.cpp
+@@ -1015,10 +1015,13 @@
+         }
+
+        #if DISTRHO_PLUGIN_WANT_TIMEPOS
++        fTimePosition.quarterNotesValid = false;
+         static constexpr const int kWantVstTimeFlags = 0x2602;
+
+         if (const VstTimeInfo* const vstTimeInfo = (const VstTimeInfo*)hostCallback(VST_HOST_OPCODE_07, 0, kWantVstTimeFlags))
+         {
++            fTimePosition.quarterNotesValid = (vstTimeInfo->flags & 0x200) != 0;
++            fTimePosition.quarterNotes = vstTimeInfo->ppqPos;
+             fTimePosition.frame   = vstTimeInfo->samplePos;
+             fTimePosition.playing = vstTimeInfo->flags & 0x2;
+
+--- a/distrho/src/DistrhoPluginVST3.cpp
++++ b/distrho/src/DistrhoPluginVST3.cpp
+@@ -1426,8 +1426,11 @@
+             fPlugin.activate();
+
+        #if DISTRHO_PLUGIN_WANT_TIMEPOS
++        fTimePosition.quarterNotesValid = false;
+         if (v3_process_context* const ctx = data->ctx)
+         {
++            fTimePosition.quarterNotesValid = (ctx->state & V3_PROCESS_CTX_PROJECT_TIME_VALID) != 0;
++            fTimePosition.quarterNotes = ctx->project_time_quarters;
+             fTimePosition.playing = ctx->state & V3_PROCESS_CTX_PLAYING;
+
+             // ticksPerBeat is not possible with VST3
+--- a/distrho/src/DistrhoPluginCLAP.cpp
++++ b/distrho/src/DistrhoPluginCLAP.cpp
+@@ -922,6 +922,8 @@
+             fTimePosition.playing = (transport->flags & CLAP_TRANSPORT_IS_PLAYING) != 0 &&
+                                     (transport->flags & CLAP_TRANSPORT_IS_WITHIN_PRE_ROLL) == 0;
+
++            fTimePosition.quarterNotesValid = (transport->flags & CLAP_TRANSPORT_HAS_BEATS_TIMELINE) != 0;
++            fTimePosition.quarterNotes = static_cast<double>(transport->song_pos_beats) / CLAP_BEATTIME_FACTOR;
+             fTimePosition.frame = process->steady_time >= 0 ? process->steady_time : 0;
+
+             if (transport->flags & CLAP_TRANSPORT_HAS_TEMPO)
+@@ -973,6 +975,7 @@
+         {
+             fTimePosition.playing = false;
+             fTimePosition.frame = 0;
++            fTimePosition.quarterNotesValid = false;
+             fTimePosition.bbt.valid          = false;
+             fTimePosition.bbt.beatsPerMinute = 120.0;
+             fTimePosition.bbt.bar            = 1;
+--- a/distrho/src/DistrhoPluginAU.cpp
++++ b/distrho/src/DistrhoPluginAU.cpp
+@@ -2304,6 +2304,7 @@
+        #endif
+
+        #if DISTRHO_PLUGIN_WANT_TIMEPOS
++        fTimePosition.quarterNotesValid = false;
+         if (fHostCallbackInfo.beatAndTempoProc != nullptr ||
+             fHostCallbackInfo.musicalTimeLocationProc != nullptr ||
+             fHostCallbackInfo.transportStateProc != nullptr)
+@@ -2328,9 +2329,12 @@
+                 fTimePosition.bbt.beatType    = 4.f;
+             }
+
++            fTimePosition.quarterNotesValid = false;
+             if (fHostCallbackInfo.beatAndTempoProc != nullptr
+                 && fHostCallbackInfo.beatAndTempoProc(fHostCallbackInfo.hostUserData, &g1, &g2) == noErr)
+             {
++                fTimePosition.quarterNotes = g1;
++                fTimePosition.quarterNotesValid = true;
+                 const double beat = static_cast<int32_t>(g1);
+
+                 fTimePosition.bbt.valid = true;

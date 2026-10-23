@@ -10,6 +10,7 @@
 import type { RoleRegistry, RomContext, RoleInstance } from "./systemRoles";
 import { LsdjSyncMode } from "./settingsEnums";
 import { isRisaRomHeader, isRisaSyncRom } from "./risa";
+import { isRisaResolvedSeekRom, risaReadyStatus } from "./risa/romDetect";
 import { isBlipToasterRomHeader, blipToasterChip } from "./bliptoaster/romDetect";
 import { isSmsggdjRom } from "./smsSync";
 
@@ -69,7 +70,7 @@ export function registerRomProviders(registry: RoleRegistry): void {
   registry.registerRomProvider((rom: RomContext): RoleInstance[] => {
     if (rom.platform !== "nes" || !isRisaRomHeader(rom.header)) return [];
     const roles: RoleInstance[] = [{ kind: "risa", config: {} }, { kind: "risa-assets", config: { overrides: [] } }];
-    if (isRisaSyncRom(rom.header)) roles.push({ kind: "risa-sync", config: {} });
+    if (isRisaSyncRom(rom.header)) roles.push({ kind: "risa-sync", config: isRisaResolvedSeekRom(rom.header) ? { resolvedSeek: true, ...risaReadyStatus(rom.header) } : {} });
     return roles;
   });
 

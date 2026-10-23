@@ -1,4 +1,5 @@
 #include "host/dsp/DspRuntime.hpp"
+#include "host/dsp/SeekWorker.hpp"
 
 #include <chrono>
 
@@ -192,6 +193,16 @@ JSValue pushCoreBytes(JSContext* ctx, JSValueConst /*thisVal*/, int argc, JSValu
     return JS_UNDEFINED;
 }
 
+JSValue readRamByteThunk(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    DspRuntime* rt = self(ctx);
+    if (!rt || argc < 2 || !rt->readRamByte) return JS_UNDEFINED;
+    std::uint32_t system = 0, address = 0;
+    if (JS_ToUint32(ctx, &system, argv[0]) < 0 || JS_ToUint32(ctx, &address, argv[1]) < 0)
+        return JS_UNDEFINED;
+    const int value = rt->readRamByte(system, address);
+    return value < 0 ? JS_UNDEFINED : JS_NewInt32(ctx, value);
+}
+
 // pressButton(system, frame, button, down) — the role-generated button sink; appends the transition
 // to buttonOut_. (Distinct from a host UI tap, which the render loop delivers to a core directly.)
 JSValue pressButton(JSContext* ctx, JSValueConst /*thisVal*/, int argc, JSValueConst* argv) {
@@ -246,6 +257,16 @@ JSValue traceNameThunk(JSContext* ctx, JSValueConst /*thisVal*/, int argc, JSVal
 }
 #endif
 
+JSValue requestRisaSeek(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 3) return JS_UNDEFINED;
+    DspRuntime::SeekRequest r;
+    JS_ToUint32(ctx, &r.system, argv[0]);
+    JS_ToUint32(ctx, &r.token, argv[1]);
+    JS_ToFloat64(ctx, &r.clock, argv[2]);
+    if (auto* rt = self(ctx)) rt->seekRequests_.push_back(r);
+    return JS_UNDEFINED;
+}
+
 } // namespace
 
 DspRuntime::DspRuntime() {
@@ -267,6 +288,8 @@ DspRuntime::DspRuntime() {
     JS_SetPropertyStr(ctx_, global, "emitControllerOut", JS_NewCFunction(ctx_, emitControllerOut, "emitControllerOut", 1));
     JS_SetPropertyStr(ctx_, global, "emitCoreMidi", JS_NewCFunction(ctx_, emitCoreMidi, "emitCoreMidi", 3));
     JS_SetPropertyStr(ctx_, global, "pushCoreBytes", JS_NewCFunction(ctx_, pushCoreBytes, "pushCoreBytes", 4));
+    JS_SetPropertyStr(ctx_, global, "readRamByte", JS_NewCFunction(ctx_, readRamByteThunk, "readRamByte", 2));
+    JS_SetPropertyStr(ctx_, global, "requestRisaSeek", JS_NewCFunction(ctx_, requestRisaSeek, "requestRisaSeek", 3));
     JS_SetPropertyStr(ctx_, global, "pressButton", JS_NewCFunction(ctx_, pressButton, "pressButton", 4));
 #ifdef RETROPLUG_PROFILE
     // Per-role runtime tracing (spec/08-profiling.md Tier B): bind the span thunks + name the fixed
@@ -282,9 +305,11 @@ DspRuntime::DspRuntime() {
     traceName(DSP_SPAN_PUBLISH, "state-publish");
 #endif
     JS_FreeValue(ctx_, global);
+    seekWorker_ = std::make_unique<SeekWorker>();
 }
 
 DspRuntime::~DspRuntime() {
+    seekWorker_.reset();
     if (rt_) {
         JS_FreeContext(ctx_);
         JS_FreeRuntime(rt_);
@@ -308,6 +333,7 @@ bool DspRuntime::loadKernel(const std::vector<std::uint8_t>& bytecode) {
     const bool ok = !JS_IsException(res);
     JS_FreeValue(ctx_, res);
     loaded_ = ok;
+    if (ok) seekWorker_->setKernel(bytecode);
     return ok;
 }
 
@@ -335,6 +361,7 @@ void DspRuntime::processBlock(const std::vector<MidiIn>& midi,
                               const std::vector<SerialOut>& serialOut,
                               const std::vector<MidiIn>& controllerIn,
                               const BlockInfo& block) {
+    seekRequests_.clear();
     serialIn_.clear();
     midiOut_.clear();
     coreMidi_.clear();
@@ -371,6 +398,23 @@ void DspRuntime::processBlock(const std::vector<MidiIn>& midi,
     // Only sent when true: the kernel reads an absent property as false, so a host with no control surface
     // (every host but the standalone with a Launchpad connected) pays nothing per block.
     if (block.controllerConnected) JS_SetPropertyStr(ctx, input, "controllerConnected", JS_NewBool(ctx, true));
+
+    JSValue seeks = JS_UNDEFINED;
+    std::uint32_t seekCount = 0;
+    if (seekWorker_) seekWorker_->drain([&](const SeekWorker::Result& r) {
+        if (JS_IsUndefined(seeks)) seeks = JS_NewArray(ctx);
+        JSValue entry = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, entry, "system", JS_NewInt64(ctx, r.system));
+        JS_SetPropertyStr(ctx, entry, "token", JS_NewInt64(ctx, r.token));
+        JS_SetPropertyStr(ctx, entry, "clock", JS_NewFloat64(ctx, r.clock));
+        JS_SetPropertyStr(ctx, entry, "ok", JS_NewBool(ctx, r.ok));
+        JSValue bytes = JS_NewArray(ctx);
+        if (r.ok) for (std::uint32_t i = 0; i < r.packet.size(); ++i)
+            JS_SetPropertyUint32(ctx, bytes, i, JS_NewInt32(ctx, r.packet[i]));
+        JS_SetPropertyStr(ctx, entry, "packet", bytes);
+        JS_SetPropertyUint32(ctx, seeks, seekCount++, entry);
+    });
+    if (!JS_IsUndefined(seeks)) JS_SetPropertyStr(ctx, input, "seekResults", seeks);
 
     JSValue midiArr = JS_NewArray(ctx);
     for (std::size_t i = 0; i < midi.size(); ++i) {
@@ -548,3 +592,14 @@ void          DspRuntime::traceReset(bool /*arm*/) {}
 std::vector<DspTraceSpan> DspRuntime::traceSpans() const { return {}; }
 std::vector<std::string>  DspRuntime::traceNames() const { return {}; }
 #endif
+
+void DspRuntime::prepareSeek(const SeekRequest& request, const std::uint8_t* song, std::size_t size) {
+    if (seekWorker_) seekWorker_->submit(request.system, request.token, request.clock, song, size);
+}
+void DspRuntime::invalidateSeeks(std::uint32_t system) {
+    if (seekWorker_) seekWorker_->invalidate(system);
+}
+
+void DspRuntime::forgetSeeks(std::uint32_t system) {
+    if (seekWorker_) seekWorker_->forget(system);
+}

@@ -1,3 +1,5 @@
+import { findMagicInRange } from "./rom/find";
+
 // risa ROM detection. An NES ROM has no cartridge-title field (unlike Game Boy / LSDj), and risa's
 // "RISA V" ASCII marker lives deep in the PRG — far past the ~336-byte header a RomContext exposes. So
 // we detect risa by its distinctive iNES 2.0 header fingerprint, all within the first 16 bytes:
@@ -66,4 +68,31 @@ export function risaMarkerVersion(header: Uint8Array): string | null {
 /** True if the ROM advertises the risa host-sync receive path. */
 export function isRisaSyncRom(header: Uint8Array): boolean {
   return risaMarkerVersion(header) !== null;
+}
+
+const RISA_SEEK_MARKER = [0x52, 0x53, 0x45, 0x45, 0x4b, 0x31]; // RSEEK1
+const RISA_READY_MARKER = [0x52, 0x52, 0x45, 0x41, 0x44, 0x59, 0x31]; // RREADY1
+
+/** Resolved per-track seek capability, independent of the app version marker. */
+export function isRisaResolvedSeekRom(header: Uint8Array): boolean {
+  return findMagicInRange(header, RISA_SEEK_MARKER, 0, RISA_MARKER_SCAN_LEN) >= 0;
+}
+
+/** RREADY1 exposes two internal-RAM bytes: silent-preparation state and arm
+ * generation. Addresses come from this ROM's linker, never a version table. */
+export function risaReadyStatus(header: Uint8Array): { prepareAddress: number; generationAddress: number } | undefined {
+  const limit = Math.min(header.length, RISA_MARKER_SCAN_LEN);
+  // Leave room for both addresses when scanning the capability marker.
+  let start = 0;
+  while (start < limit) {
+    const at = findMagicInRange(header, RISA_READY_MARKER, start, limit - start - 4);
+    if (at < 0) return undefined;
+    const p = at + RISA_READY_MARKER.length;
+    const prepareAddress = header[p] | header[p + 1] << 8;
+    const generationAddress = header[p + 2] | header[p + 3] << 8;
+    if (prepareAddress < 0x800 && generationAddress < 0x800)
+      return { prepareAddress, generationAddress };
+    start = at + 1;
+  }
+  return undefined;
 }

@@ -1,3 +1,4 @@
+import { RISA_START_LATENCY_MS } from "./risa/startLatency";
 // The plugin's control-plane bundle: the Phase-0 composition root (stores + DSP kernel), packaged for
 // a host to eval once at construct. It runs in the plugin's txiki QuickJS context (the same
 // __rpcSend-bound namespace the test host uses), composing ProjectStore/SystemsStore over the real
@@ -102,6 +103,8 @@ const LSDJ_HOST_SYNC_LATENCY_MS = 33;
 g.__rp_syncLatencyMs = (): string => {
   let ms = 0;
   for (const s of project.systems.view()) {
+    if (s.roles.some((r) => r.kind === "risa-sync" && r.config.resolvedSeek && r.config.prepareAddress !== undefined && r.config.generationAddress !== undefined))
+      ms = Math.max(ms, RISA_START_LATENCY_MS);
     const mode = (s.roles.find((r) => r.kind === "lsdj-sync")?.config as { mode?: LsdjSyncMode } | undefined)?.mode;
     if (mode === LsdjSyncMode.MidiSync || mode === LsdjSyncMode.MidiSyncArduinoboy) ms = Math.max(ms, LSDJ_HOST_SYNC_LATENCY_MS);
   }

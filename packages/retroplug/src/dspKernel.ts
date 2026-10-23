@@ -10,12 +10,21 @@ import type { MidiEvent } from "./midiRouting";
 import type { RoleInstance, RoleRegistry } from "./systemRoles";
 
 /** Per-block transport/timing context (mirrors native AudioBlockInfo / DspBlockInfo). */
+export interface SeekResult {
+  system: number;
+  token: number;
+  clock: number;
+  ok: boolean;
+  packet: number[];
+}
+
 export interface BlockInfo {
   frames: number;
   sampleRate: number;
   tempo: number;
   ppqStart: number; // PPQ position at block start
   transport: boolean;
+  seekResults?: SeekResult[];
   /** Whether a control surface is attached RIGHT NOW.
    *
    *  Carried per block like `transport`, and a one-shot could not replace it: the user starts the app,
@@ -104,6 +113,8 @@ export interface SinkTarget {
   emitMidiOut(system: number, frame: number, data: number[]): void;
   emitCoreMidi(system: number, frame: number, data: number[]): void;
   pushCoreBytes(system: number, frame: number, data: number[], flush?: boolean): void;
+  requestRisaSeek?(system: number, token: number, clock: number): void;
+  readRamByte?(system: number, address: number): number | undefined;
   pressButton(system: number, frame: number, button: number, down: boolean): void;
   /** Bytes back to a control surface (Launchpad LEDs). Optional: a host with no device link bound
    *  simply doesn't implement it, and the kernel drops the write rather than requiring every host to
@@ -160,6 +171,10 @@ export interface SystemCtx {
   serialOut: number[];
   block: BlockInfo;
   state: Record<string, unknown>;
+  seekResult(): SeekResult | undefined;
+  requestRisaSeek(token: number, clock: number): void;
+  /** Audio-thread-owned, side-effect-free RAM read; unavailable on hosts without live RAM. */
+  readRamByte(address: number): number | undefined;
   pushSerialIn(frame: number, byte: number): void;
   emitMidiOut(frame: number, data: number[]): void;
   emitCoreMidi(frame: number, data: number[]): void;
@@ -421,6 +436,7 @@ export class DspKernel {
     b.tempo = dyn.tempo;
     b.ppqStart = dyn.ppqStart;
     b.transport = dyn.transport;
+    b.seekResults = dyn.seekResults;
     b.controllerConnected = dyn.controllerConnected === true; // absent = no device (native omits it when false)
     b.midiIn = dyn.midiIn;
     b.buttons = dyn.buttons;
@@ -499,6 +515,9 @@ export class DspKernel {
       serialOut: slot.serialOut,
       block: this.block,
       state: this.stageState(id, stageIndex),
+      readRamByte: (address) => this.sink.readRamByte?.(id, address),
+      seekResult: () => this.block.seekResults?.find((r) => r.system === id),
+      requestRisaSeek: (token, clock) => this.sink.requestRisaSeek?.(id, token, clock),
       pushSerialIn: (frame, byte) => this.sink.pushSerialIn(id, frame, byte),
       emitMidiOut: (frame, data) => this.sink.emitMidiOut(id, frame, data),
       emitCoreMidi: (frame, data) => this.sink.emitCoreMidi(id, frame, data),

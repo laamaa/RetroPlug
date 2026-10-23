@@ -1,12 +1,15 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 // Forward-declared so quickjs.h stays out of this header (it's C, wrapped in extern "C" in
 // the .cpp). These match quickjs.h's `typedef struct JSRuntime JSRuntime;` tags.
+class SeekWorker;
 struct JSRuntime;
 struct JSContext;
 
@@ -109,7 +112,15 @@ public:
     // `flush` marks a barrier message: the device drops whatever it still holds before taking these
     // bytes (risa's host-sync arm, which must not be preceded by clocks for the position it replaces).
     struct CoreBytes { std::uint32_t system = 0; std::uint32_t frame = 0; std::vector<std::uint8_t> data; bool flush = false; };
+    struct SeekRequest { std::uint32_t system = 0, token = 0; double clock = 0; };
+    void prepareSeek(const SeekRequest& request, const std::uint8_t* song, std::size_t size);
+    void invalidateSeeks(std::uint32_t system);
+    void forgetSeeks(std::uint32_t system);
+
     struct ButtonOut { std::uint32_t system = 0; std::uint32_t frame = 0; std::uint32_t button = 0; bool down = false; };
+
+    // Installed by the audio-thread block owner; no CPU bus reads or debug locks.
+    std::function<int(std::uint32_t, std::uint32_t)> readRamByte;
 
     DspRuntime();
     ~DspRuntime();
@@ -175,6 +186,7 @@ public:
     std::vector<MidiOut>   midiOut_;    // emitMidiOut sink (host MIDI-out → DAW)
     std::vector<CoreMidi>  coreMidi_;   // emitCoreMidi sink (MIDI-in → the core's onMidi)
     std::vector<CoreBytes> coreBytes_;  // pushCoreBytes sink (raw bytes → the core's device byte-input, no framing)
+    std::vector<SeekRequest> seekRequests_;
     std::vector<ButtonOut> buttonOut_;  // pressButton sink
     // emitControllerOut sink (LED traffic → a control surface). Not system-addressed: the device belongs to
     // the project, not to a system, so there is nothing to address it by.
@@ -187,6 +199,7 @@ private:
     JSRuntime* rt_     = nullptr;
     JSContext* ctx_    = nullptr;
     bool       loaded_ = false;
+    std::unique_ptr<SeekWorker> seekWorker_;
 
     // Profiling state (bumped only under RETROPLUG_PROFILE; a harmless handful of zeroed ints
     // otherwise). `counters_` is the live allocator opaque; `base_` is the resetAllocStats snapshot

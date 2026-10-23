@@ -7,6 +7,7 @@
 
 import { DspKernel, type SinkTarget, type BlockInput, type KernelStructure, type DspTracer } from "./dspKernel";
 import { RoleRegistry } from "./systemRoles";
+import { buildRisaSeekTimeline, locateRisaClock, risaResolvedArm, sameRisaSeekSong, type RisaSeekTimeline } from "./risa/seek";
 import { registerDspRoles } from "./dspRoles";
 
 // The system-addressed sink thunks DspRuntime bound on the global (see DspRuntime.cpp). Declared for
@@ -15,6 +16,8 @@ declare function pushSerialIn(system: number, frame: number, byte: number): void
 declare function emitMidiOut(system: number, frame: number, data: number[]): void;
 declare function emitCoreMidi(system: number, frame: number, data: number[]): void;
 declare function pushCoreBytes(system: number, frame: number, data: number[], flush?: boolean): void;
+declare function readRamByte(system: number, address: number): number | undefined;
+declare function requestRisaSeek(system: number, token: number, clock: number): void;
 declare function pressButton(system: number, frame: number, button: number, down: boolean): void;
 // Bytes to a control surface (Launchpad LEDs). Bound only by a host that has a device link (M4), so it is
 // feature-gated by `typeof` below exactly like the tracing thunks - an unbound global is safe to test.
@@ -35,6 +38,8 @@ const sink: SinkTarget = {
   emitMidiOut: (system, frame, data) => emitMidiOut(system, frame, data),
   emitCoreMidi: (system, frame, data) => emitCoreMidi(system, frame, data),
   pushCoreBytes: (system, frame, data, flush) => pushCoreBytes(system, frame, data, flush),
+  readRamByte: (system, address) => typeof readRamByte === "function" ? readRamByte(system, address) : undefined,
+  requestRisaSeek: (system, token, clock) => requestRisaSeek(system, token, clock),
   pressButton: (system, frame, button, down) => pressButton(system, frame, button, down),
   // Only forwarded when the host bound a device link; otherwise the kernel drops the write, which is the
   // correct behaviour for a controller role running with no controller attached.
@@ -57,3 +62,17 @@ g.processBlock = (input: BlockInput): void => {
 };
 // Native traceReset() calls this to arm/disarm per-role span emission for a trace window.
 g.__setTrace = (on: boolean): void => kernel.setTracing(on);
+
+// Called only by the native worker's private runtime, never by processBlock.
+// Its cache is private to that worker and keyed by actual live song contents.
+const seekCache = new Map<number, { image: Uint8Array; epoch: number; timeline: RisaSeekTimeline }>();
+g.prepareRisaSeek = (system: number, buffer: ArrayBuffer, clock: number, epoch: number): number[] => {
+  const w = new Uint8Array(buffer);
+  let cached = seekCache.get(system);
+  if (!cached || cached.epoch !== epoch || !sameRisaSeekSong(cached.image, w)) {
+    cached = { image: w, epoch, timeline: buildRisaSeekTimeline(w) };
+    if (!seekCache.has(system) && seekCache.size >= 64) seekCache.delete(seekCache.keys().next().value!);
+    seekCache.set(system, cached);
+  }
+  return risaResolvedArm(locateRisaClock(cached.timeline, clock));
+};

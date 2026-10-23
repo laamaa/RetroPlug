@@ -1,6 +1,8 @@
 #include "host/rpc/EngineRpcService.hpp"
 
 #include <algorithm>
+#include <array>
+
 #include <cstddef>
 #include <fstream>
 #include <iterator>
@@ -82,8 +84,29 @@ bool EngineRpcService::constructSystem(BackendConstructSpec spec) {
     // TS owns the id counter and passes it in; the build (control thread) can fail (bad ROM), the
     // queued adopt can't — so this returns "did it build", never an id.
     const SystemId id = spec.id;
-    auto sys = factory_.build(id, toBuildSpec(spec), engine_.sampleRate());
+    const auto buildSpec = toBuildSpec(spec);
+    auto sys = factory_.build(id, buildSpec, engine_.sampleRate());
     if (!sys) return false;  // unknown backend / unreadable or non-SameBoy ROM
+
+    // Complete an explicitly requested cold boot on the control thread.
+    // The core is still exclusively owned here. Never advance restored state.
+    if (spec.warmupMs && buildSpec.savestate.empty()) {
+        const double rate = engine_.sampleRate();
+        std::uint32_t left = static_cast<std::uint32_t>(
+            std::min<std::uint32_t>(*spec.warmupMs, 2500) * rate / 1000.0);
+        std::array<float, 512> l{}, r{};
+        float* outs[] = { l.data(), r.data() };
+        while (left) {
+            const auto frames = std::min<std::uint32_t>(left, 512);
+            std::fill(l.begin(), l.end(), 0.0f);
+            std::fill(r.begin(), r.end(), 0.0f);
+            const AudioBlockInfo info{frames, rate, 120.0, 0.0, false};
+            sys->prepareForBlock(info);
+            while (sys->stepIfBelowTarget(frames)) {}
+            sys->finishBlock(info, outs, 2);
+            left -= frames;
+        }
+    }
 
     // Seed the snapshot slot from the just-built core (control thread) BEFORE handoff, so a read
     // right after construct works with no block rendered.

@@ -128,6 +128,9 @@ if(NOT _DPFJS_RESOLVE_RC EQUAL 0)
 endif()
 get_filename_component(DPFJS_PATH "${DPFJS_PACKAGE_JSON}" DIRECTORY)
 message(STATUS "dpf.js framework: ${DPFJS_PATH}")
+# Keep absolute host PPQ alongside BBT: reconstructing PPQ from meter-derived
+# bars loses position in some formats. This is a tracked patch, not a submodule bump.
+include("${CMAKE_SOURCE_DIR}/cmake/dpf-absolute-ppq.cmake")
 
 # Third-party dep warnings are silenced inside dpf.js's own CMake (it owns the
 # lvgl / txiki / quickjs / libuv / mbedtls subtrees), and the genuine warnings in

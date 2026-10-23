@@ -22,6 +22,7 @@ import {
 import { arduinoboyDecodeSerialOut, arduinoboyMasterSyncBlock, type ArduinoboyState, type MasterSyncState } from "./lsdjArduinoboy";
 import { RISA_PPQN, RISA_START, RISA_CLOCK, RISA_STOP, risaLocate, risaArmPacket } from "./risaSync";
 import { SMS_SYNC_PPQN, SMS_SYNC_COUNTER_MOD, syncLevelsFor, type SmsSyncMachine } from "./smsSync";
+import { RISA_START_LATENCY_MS } from "./risa/startLatency";
 import { registerControllerRole } from "./controllerRole";
 
 // Forward every host-MIDI byte verbatim into the system's serial input. This is both `mgb`
@@ -221,23 +222,14 @@ const lsdjSync: SystemBehavior = (c) => {
   }
 };
 
-// risa-sync (no config): drive risa's dormant N8-FIFO host-sync receive path from the DAW transport. Bytes
-// go over ctx.pushCoreBytes → the N8 FIFO (NOT MIDI — a raw byte protocol reusing MIDI status values; see
-// risaSync.ts). On a transport rise OR a ppqStart discontinuity (a DAW seek/loop) send a fresh 5-byte
-// arm+locate (computed from ppqStart) then START; on a transport fall send STOP; while playing stream
-// 24-PPQN clocks at their real sample offsets (the FIFO has no serial gate, unlike SameBoy). Attached only
-// to sync-capable risa ROMs (the RISAxyz marker) by the rom provider. Coexists with nes-n8-midi passthrough.
-//
-// Two rules from risa's protocol doc shape this beyond "arm, start, clock, stop":
-//  - The arm FLUSHES the FIFO. It's a barrier: clocks queued for the old position must not arrive after
-//    a re-locate, so the flush drops both undelivered and delivered-but-unread bytes.
-//  - No clock for the ARMED position. risa performs one priming sequencer tick itself when it applies the
-//    locate, so the target row triggers immediately; an F8 for that same clock would double-advance it.
-//    The arm therefore points the clock stream at armedClock + 1: "the next F8 is the first clock after
-//    the locate". That also covers an exact loop back to the same position, where eachTick's own resync
-//    (which only fires on a jump of more than a tick) would leave the counter past the block and emit none.
+// risa-sync selects prepared, resolved or legacy structural seeking from ROM
+// capability facts. Every arm is a FIFO barrier; the target clock is primed by
+// the ROM, so external clocks start at target + 1. The legacy fallback retains
+// its five-byte F9 52 arm and fixed-grid position mapping.
 const RISA_SEEK_TOL = 1e-3; // quarters — contiguous block edges meet exactly; a seek/loop jump far exceeds this.
 const risaSync: SystemBehavior = (c) => {
+  if (c.config.resolvedSeek && c.config.prepareAddress !== undefined && c.config.generationAddress !== undefined) { risaPreparedSync(c); return; }
+  if (c.config.resolvedSeek) { risaResolvedSync(c); return; }
   const st = c.state as { prevT?: boolean; ppqEnd?: number };
   const b = c.block;
   const playing = b.transport;
@@ -265,6 +257,129 @@ const risaSync: SystemBehavior = (c) => {
   } else {
     st.ppqEnd = undefined;
   }
+};
+
+// One fixed look-ahead window covers worker preparation, FIFO delivery and
+// the ROM's silent structural setup. Clock timestamps keep their host sample
+// offsets, including through tempo changes. PDC reports this SAME delay.
+const risaPreparedSync: SystemBehavior = (c) => {
+  const b = c.block;
+  const st = c.state as {
+    prevT?: boolean; ppqEnd?: number; token?: number; clock?: number;
+    elapsed?: number; delay?: number; extra?: number; packetSent?: boolean;
+    generation?: number; started?: boolean; pending?: number[]; warmClock?: number;
+  };
+  const result = c.seekResult();
+  if (result?.token === 0) {
+    st.prevT = false;
+    st.warmClock = undefined;
+  }
+  const seek = st.ppqEnd !== undefined && Math.abs(b.ppqStart - st.ppqEnd) > RISA_SEEK_TOL;
+  const playing = b.transport && b.ppqStart >= 0;
+  if (!playing) {
+    // Build the cold timeline while stopped without taking ownership of the
+    // ROM: previews/manual playback keep working. Start still captures fresh
+    // bytes, so an edit after this warm-up cannot reuse a stale timeline.
+    const warmClock = Math.floor(Math.max(0, b.ppqStart) * RISA_PPQN);
+    if (result?.token === 0xffffffff && result.ok && result.clock === warmClock)
+      st.warmClock = warmClock;
+    if (st.warmClock !== warmClock) c.requestRisaSeek(0xffffffff, warmClock);
+  }
+  if (playing && (!st.prevT || seek)) {
+    st.token = ((st.token ?? 0) + 1) >>> 0 || 1;
+    if (st.token === 0xffffffff) st.token = 1; // reserved for stopped warm-up
+    // REAPER positions use integer sample times. A nominal bar boundary can
+    // be a couple of microseconds below its exact PPQ value; don't resolve
+    // the previous row for that harmless rounding error.
+    const clocks = b.ppqStart * RISA_PPQN;
+    const nearest = Math.round(clocks);
+    st.clock = Math.abs(clocks - nearest) <= RISA_PPQN * b.tempo / (b.sampleRate * 60)
+      ? nearest : Math.floor(clocks);
+    st.elapsed = 0;
+    st.delay = Math.round(b.sampleRate * RISA_START_LATENCY_MS / 1000);
+    st.extra = 0;
+    st.packetSent = st.started = false;
+    st.pending = [];
+    c.setNextTick(st.clock + 1);
+    c.pushCoreBytes(0, [RISA_STOP], true);
+  } else if (!playing && st.prevT) {
+    // Already queued clocks end at this same delayed stop edge.
+    c.pushCoreBytes((st.delay ?? 0) + (st.extra ?? 0), [RISA_STOP]);
+    st.started = false;
+    st.pending = [];
+  }
+  if (playing) {
+    if (!st.packetSent) {
+      if (result && result.token === st.token && result.ok && result.clock === st.clock) {
+        st.generation = c.readRamByte(c.config.generationAddress as number);
+        c.pushCoreBytes(0, result.packet, true); // prepare WITHOUT triggering any row
+        st.packetSent = true;
+      } else c.requestRisaSeek(st.token!, st.clock!);
+    }
+    if (st.packetSent && !st.started &&
+        c.readRamByte(c.config.generationAddress as number) !== st.generation &&
+        c.readRamByte(c.config.prepareAddress as number) === 5) {
+      // Never release FA before the new generation acknowledges its setup.
+      // If preparation unusually exceeds the allowance, preserve the first
+      // row's timing by shifting the whole stream; don't burst missed clocks.
+      st.extra = Math.max(0, st.elapsed! - st.delay!);
+      c.pushCoreBytes(Math.max(0, st.delay! - st.elapsed!), [RISA_START]);
+      for (const due of st.pending!) c.pushCoreBytes(Math.max(0, due + st.extra - st.elapsed!), [RISA_CLOCK]);
+      st.pending!.length = 0;
+      st.started = true;
+    }
+    c.eachTick(RISA_PPQN, (_tick, off) => {
+      if (st.started) c.pushCoreBytes(off + st.delay! + st.extra!, [RISA_CLOCK]);
+      else if (st.pending!.length < 512) st.pending!.push(st.elapsed! + off + st.delay!);
+      // Bound an indefinitely unready/malformed ROM. Restart from a fresh
+      // host position instead of retaining unbounded timing history.
+      // At the bound, prevT below requests a fresh transaction next block.
+    });
+    st.elapsed! += b.frames;
+  }
+  st.prevT = playing && (st.pending?.length ?? 0) < 512;
+  st.ppqEnd = playing ? b.ppqStart + b.frames * b.tempo / (b.sampleRate * 60) : undefined;
+};
+
+// Resolved seeking uses the host worker's fresh live-memory snapshot. While
+// preparing, gate the old playback and keep requesting the CURRENT clock. A
+// completed result carries its exact clock; catch up the small worker/block
+// delay explicitly, then resume the ordinary drift-free stream.
+const risaResolvedSync: SystemBehavior = (c) => {
+  const st = c.state as { prevT?: boolean; ppqEnd?: number; token?: number; waiting?: boolean; active?: boolean };
+  const b = c.block;
+  const result = c.seekResult();
+  if (result?.token === 0) { st.prevT = false; st.active = false; }
+  const seek = st.ppqEnd !== undefined && Math.abs(b.ppqStart - st.ppqEnd) > RISA_SEEK_TOL;
+  if (b.transport && (!st.prevT || seek)) {
+    st.token = ((st.token ?? 0) + 1) >>> 0 || 1;
+    st.waiting = true;
+    st.active = false;
+    c.pushCoreBytes(0, [RISA_STOP], true);
+  } else if (!b.transport && st.prevT) {
+    c.pushCoreBytes(0, [RISA_STOP], true);
+    st.active = false;
+    st.waiting = false;
+  }
+  const clock = Math.floor(Math.max(0, b.ppqStart) * RISA_PPQN);
+  if (b.transport && b.ppqStart >= 0 && st.waiting) {
+    if (result && result.token === st.token && result.ok &&
+        result.clock <= clock && clock - result.clock <= 24) {
+      c.pushCoreBytes(0, result.packet, true);
+      c.pushCoreBytes(0, [RISA_START]);
+      for (let tick = result.clock + 1; tick <= clock; tick++) c.pushCoreBytes(0, [RISA_CLOCK]);
+      c.setNextTick(clock + 1);
+      st.waiting = false;
+      st.active = true;
+    } else {
+      // A boot-in-progress snapshot can still lack the initialized magic;
+      // retry rather than latching a permanent failure before the ROM boots.
+      c.requestRisaSeek(st.token!, clock);
+    }
+  }
+  if (b.transport && b.ppqStart >= 0 && st.active) c.eachTick(RISA_PPQN, (_tick, off) => c.pushCoreBytes(off, [RISA_CLOCK]));
+  st.prevT = b.transport;
+  st.ppqEnd = b.transport ? b.ppqStart + b.frames * b.tempo / (b.sampleRate * 60) : undefined;
 };
 
 // sms-sync: clock smsggdj from the DAW transport by driving a 2-bit counter onto its sync lines. The
@@ -327,9 +442,9 @@ export function registerDspRoles(registry: RoleRegistry): void {
   // NES host-MIDI: forward routed MIDI to the core's onMidi (→ the always-attached N8 FIFO). Attached to
   // every NES ROM by the rom provider (romProviders.ts), mirroring the native always-on N8 role.
   registry.registerRole({ kind: "nes-n8-midi", category: "feature", scope: "system", schema: z.object({}), dsp: forwardMidiToCore });
-  // risa-sync: no config — drives risa's N8-FIFO host-sync receive path from the DAW transport (locate /
+  // risa-sync: ROM-derived capabilities select the N8-FIFO host transport (locate /
   // start / 24-PPQN clock / stop over pushCoreBytes). Attached only to sync-capable risa ROMs.
-  registry.registerRole({ kind: "risa-sync", category: "feature", scope: "system", schema: z.object({}), dsp: risaSync });
+  registry.registerRole({ kind: "risa-sync", category: "feature", scope: "system", schema: z.object({ resolvedSeek: z.boolean().optional(), prepareAddress: z.number().int().min(0).max(2047).optional(), generationAddress: z.number().int().min(0).max(2047).optional() }), dsp: risaSync });
   // sms-sync: no config - clocks smsggdj by holding a 2-bit counter on controller port 2 (TR + TH) at
   // 24 PPQN. Attached only to smsggdj (the SMSGGDJ marker), NOT to every SMS ROM: these are Player 2's
   // button lines, so an unconditional attach would inject phantom P2 presses into any game.

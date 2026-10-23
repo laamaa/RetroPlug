@@ -67,6 +67,7 @@ const specParams = (spec: ConstructSpec, id: number): Record<string, unknown> =>
   if (spec.savPath != null) p.savPath = spec.savPath;
   if (spec.statePath != null) p.statePath = spec.statePath;
   if (spec.replaceId !== undefined) p.replaceId = spec.replaceId;
+  if (spec.warmupMs !== undefined) p.warmupMs = spec.warmupMs;
   if (spec.romBytes) p.romBytes = spec.romBytes;
   if (spec.sramBytes) p.sramBytes = spec.sramBytes;
   if (spec.stateBytes) p.stateBytes = spec.stateBytes;

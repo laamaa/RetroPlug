@@ -27,6 +27,12 @@ Engine::Engine(double sampleRate) : sampleRate_(sampleRate) {
     // Pre-reserve so adoptSystem/swapSystem never reallocate systems_ when the audio thread owns
     // the Project (production reserves the same way).
     project_.reserve(16);
+    dsp_.readRamByte = [this](std::uint32_t id, std::uint32_t address) -> int {
+        auto* sys = project_.findSystem(id);
+        if (!sys) return -1;
+        const auto memory = sys->getMemory(rp::MemoryType::Ram, rp::AccessType::Read);
+        return memory.valid() && address < memory.size() ? memory.data()[address] : -1;
+    };
 }
 
 void Engine::adoptSystem(std::unique_ptr<SystemBase> sys) {
@@ -36,6 +42,7 @@ void Engine::adoptSystem(std::unique_ptr<SystemBase> sys) {
 }
 
 std::unique_ptr<SystemBase> Engine::removeSystem(SystemId id) {
+    dsp_.forgetSeeks(id);
     auto removed = std::unique_ptr<SystemBase>(project_.removeSystemAndRelease(id));  // does its own rebuild
     // Drop the arm record FIRST if it named the departing core — it is the caller's to delete now, and
     // syncSplitPlan must not chase a pointer through a Project that no longer holds it.
@@ -45,6 +52,8 @@ std::unique_ptr<SystemBase> Engine::removeSystem(SystemId id) {
 }
 
 std::unique_ptr<SystemBase> Engine::replaceSystem(SystemId id, std::unique_ptr<SystemBase> sys) {
+    if (sys->id() == id) dsp_.invalidateSeeks(id);
+    else dsp_.forgetSeeks(id);
     // swapSystem returns the displaced core, or the incoming one unchanged if id wasn't found
     // (then it was never adopted) — either way it's the leftover for the caller to dispose.
     SystemBase* old = project_.swapSystem(id, sys.release());
@@ -168,6 +177,14 @@ void Engine::runBlockWithRouter(std::uint32_t frames, const AudioRouter& router)
 #endif
         const DspRuntime::BlockInfo dInfo{ frames, sampleRate_, bpm_, ppq_, transport_, controllerConnected_ };
         dsp_.processBlock(pendingMidi_, kNoButtons, kNoKeys, pendingSerialOut_, pendingControllerMidi_, dInfo);
+        // The block owner captures live cartridge bytes only when the kernel
+        // requests a seek. The private worker interprets them off-thread.
+        for (const auto& request : dsp_.seekRequests_) {
+            if (auto* system = project_.findSystem(request.system)) {
+                auto memory = system->getMemory(rp::MemoryType::Sram, rp::AccessType::Read);
+                if (memory.valid()) dsp_.prepareSeek(request, memory.data(), memory.size());
+            }
+        }
         pendingMidi_.clear();       // staged host MIDI consumed this block
         pendingControllerMidi_.clear();
         pendingSerialOut_.clear();  // last block's serial-out consumed by the kernel this block

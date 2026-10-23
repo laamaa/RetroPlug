@@ -145,6 +145,13 @@ submenu named after it. What that submenu holds depends on the cart:
 Unlike LSDj, risa and smsggdj need no sync mode picked: they follow the host transport
 directly, so pressing play in your DAW plays the cart in time.
 
+Risa builds advertising `RSEEK1` also support song-aware DAW seeking. RetroPlug
+reads the live song and resolves each track on a background worker; older ROMs
+retain the original structural locate. Builds also advertising `RREADY1` wait
+for silent seek preparation and use a 100 ms delay reported to the DAW for
+compensation. See [Risa seeking](docs/risa-seeking.md)
+for behavior, validation and the remaining startup/audio-state limits.
+
 An unrecognised build of a cart is shown greyed out as `(Unsupported Version)`.
 
 ### Songs

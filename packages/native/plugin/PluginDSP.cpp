@@ -23,6 +23,7 @@
 #include "dpfjs/host/TjsHostRuntime.hpp"  // shared txiki/QuickJS host (+ tjs.h/quickjs.h)
 
 #include "PluginShared.hpp"     // SharedDSP handoff to the editor
+#include "HostTransport.hpp"
 #include "LastGoodState.hpp"   // keeps a failed project serialization from reporting "empty"
 
 #include "host/engine/Engine.hpp"
@@ -111,6 +112,7 @@ class PluginDSP : public Plugin {
     mutable retroplug::LastGoodState lastGoodProject_;
 
     float gainDb_ = 0.0f;
+    std::atomic<double> syncLatencyMs_{0.0};
 
     // --- CC slot state ---
     // Names are main-thread only (initParameter runs from the DPF ctor and from reinitParameters, both
@@ -257,8 +259,7 @@ protected:
     void setState(const char* key, const char* value) override {
         if (std::strcmp(key, "project") != 0) return;
         callGlobal("__rp_loadProjectB64", value ? value : "");
-        updateLatency();        // the loaded project's sync mode determines the compensable latency
-        updateParameterMap();   // ...and its ROMs determine what the DAW's CC slots are called
+        updateParameterMap();   // refresh sync latency and the loaded ROMs' CC labels
     }
 
     // --- audio lifecycle: DPF owns the audio thread and calls run(), so the plugin drives the Engine
@@ -268,7 +269,6 @@ protected:
         // drained by run() each block. (Set BEFORE the host starts calling run(); the quiescent path
         // flushed every push, so the command ring is empty at this handoff.) Then report PDC latency.
         svc_.invoker.setAudioThreadOwns(true);
-        updateLatency();
         updateParameterMap();
     }
     void deactivate() override {
@@ -279,17 +279,18 @@ protected:
         svc_.invoker.drainInto(svc_.engine);
         svc_.invoker.reclaimReleased();
     }
-    void sampleRateChanged(double newSampleRate) override { svc_.engine.setSampleRate(newSampleRate); }
+    void sampleRateChanged(double newSampleRate) override {
+        svc_.engine.setSampleRate(newSampleRate);
+        // Do not enter the control-plane JS context from this callback.
+        setLatency(static_cast<uint32_t>(syncLatencyMs_.load(std::memory_order_relaxed) * newSampleRate / 1000.0 + 0.5));
+    }
 
     // --- the per-block loop (replaces AudioDriverRpcService::audioLoop) ---
     void run(const float**, float** outputs, uint32_t frames,
              const MidiEvent* midiEvents, uint32_t midiEventCount) override {
-        // Transport from the host. The Engine advances its own PPQ from bpm/transport, so pass those
-        // two only (pushing host ppq too would double-count).
-        double bpm = 120.0;
+        // The DAW owns block-start musical time. Engine advances afterward
+        // only as a fallback for hosts without a valid musical position.
         const TimePosition& tp = getTimePosition();
-        if (tp.bbt.valid) bpm = tp.bbt.beatsPerMinute;
-        const bool playing = tp.playing;
 
         // Host MIDI in → stage directly on the audio thread (bypasses the ring; safe because run() owns
         // the Engine while active). Every size: DPF keeps a message longer than the inline data[4] (a
@@ -343,8 +344,7 @@ protected:
         // (direct — we're the audio thread) → render into the output channels (the plugin's 4 stereo
         // pairs; routed per audioRouting by the Engine's MultiOutRouter).
         svc_.invoker.drainInto(svc_.engine);
-        svc_.engine.setBpm(bpm);
-        svc_.engine.setTransport(playing);
+        retroplug::applyHostTransport(svc_.engine, tp);
         svc_.engine.processBlock(frames, outputs, DISTRHO_PLUGIN_NUM_OUTPUTS);
 
         // Kernel MIDI-out → the DAW (drain the block just rendered, then clear).
@@ -458,16 +458,20 @@ private:
     void updateLatency() {
         const std::string ms = callGlobal("__rp_syncLatencyMs", nullptr);
         const double latMs = ms.empty() ? 0.0 : std::atof(ms.c_str());
+        syncLatencyMs_.store(latMs, std::memory_order_relaxed);
         setLatency(static_cast<uint32_t>(latMs * getSampleRate() / 1000.0 + 0.5));
     }
 
 public:
     // Re-label the CC slot pool from whatever the control plane says the loaded ROMs expose, and ask the
     // host to re-read the parameter info if anything moved (spec/12-dynamic-parameters.md). The JSON is
-    // compared as a string first, so the common "nothing changed" poll costs one JS call and a compare.
+    // compared as a string first, so unchanged CC labels skip re-declaration; sync latency is refreshed independently.
     // Main thread only — it writes the name strings initParameter reads, and DPF notifies the host inline.
     // Public so the editor can drive it from uiIdle: a ROM loaded through the UI never reaches setState.
     void updateParameterMap() {
+        // ROM swaps can change sync latency without changing a single CC
+        // label. Refresh it even when the parameter-map comparison is a no-op.
+        updateLatency();
         const std::string json = callGlobal("__rp_parameterMapJson", nullptr);
         if (json == ccMapJson_) return;
         ccMapJson_ = json;

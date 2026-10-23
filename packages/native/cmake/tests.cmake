@@ -16,8 +16,11 @@ retroplug_add_test_binary(
     NAME     retroplug-plugin-test
     SOURCES  test/plugin/ContextTargets.test.cpp
              test/plugin/LastGoodState.test.cpp
+             test/plugin/HostTransport.test.cpp
+             test/plugin/SeekWorker.test.cpp
     LIBS     qjs                                        # bare quickjs: JS_* + ArrayBuffer / CFunctionData
-    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/plugin         # ContextTargets.hpp
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/src
+             ${CMAKE_CURRENT_SOURCE_DIR}/plugin         # ContextTargets.hpp
              ${RP_QUICKJS_INCLUDE})                     # quickjs.h
 
 # Guards the dynamic-parameter diff classifier in the DPF fork (PluginExporter::reinitParameters —

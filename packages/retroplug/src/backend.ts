@@ -725,6 +725,9 @@ export interface FileBrowserOpts {
  *  TS-side before the call. `savPath`/`statePath` are the exact files to load-from +
  *  auto-save-to / boot-from, or `null` for fresh / cold. */
 export interface ConstructSpec {
+  /** Cold-boot emulation before audio-thread handoff, discarding its output.
+   *  Bounded to 2500 ms; ignored when restoring a savestate. */
+  warmupMs?: number;
   /** The ROM file to slurp; `""` when an embedded ROM is used instead. */
   romPath: string;
   /** What the ROM targets (TS classifies it via platform.ts) — tells a multi-platform core (Mesen)
