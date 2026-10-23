@@ -13,6 +13,7 @@ import type { Overlay } from "./overlay";
 export interface SongImport extends Overlay {
   /** Begin an import: validate `source` against `sys`'s console, then show the picker (or an error notice). */
   begin: (sys: SystemView, source: Uint8Array) => void;
+  notice: (title: string, body: string) => void;
 }
 
 export function useSongImport(stores: AppStores): SongImport {
@@ -66,5 +67,6 @@ export function useSongImport(stores: AppStores): SongImport {
   };
 
   const tree = pending ? buildImportModal(pending, { toggle, toggleAll, apply, onClose }) : null;
-  return { tree, onClose, begin };
+  return { tree, onClose, begin,
+    notice: (title, body) => setPending({ kind: "notice", title, body }) };
 }

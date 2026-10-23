@@ -271,7 +271,7 @@ export function App() {
     if (!veto) native.__rp_quitWindow?.();
   };
 
-  const ctx: MenuContext = { stores, settings, userConfig, bindings, systems, recent, version, newProject: modals.newProject, loadProject: modals.loadProject, loadRomAsProject: modals.loadRomAsProject, requestExit, beginSongImport: songImport.begin, openLsdjHd: setHdSystemId };
+  const ctx: MenuContext = { stores, settings, userConfig, bindings, systems, recent, version, newProject: modals.newProject, loadProject: modals.loadProject, loadRomAsProject: modals.loadRomAsProject, requestExit, beginSongImport: songImport.begin, showSongNotice: songImport.notice, openLsdjHd: setHdSystemId };
 
   // A full-window overlay (file browser / close prompt / project modal / song import) draws above
   // everything and owns the keypad; the start menu (empty project) is the same full-window menu, always open.

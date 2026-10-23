@@ -45,14 +45,15 @@ import { activeSlot as lsdjActiveSlot } from "../../../src/lsdj/codec/sav";
 import { importSongFiles } from "../../../src/lsdjSongImport";
 import {
   songRecordBytes,
-  replaceSongRecordInSav,
-  addSongRecordToSav,
   workingSongRecord,
   saveWorkingToCatalog,
   canSaveWorkingToCatalog as canRisaSaveWorking,
 } from "../../../src/risaSongOps";
+import { encodeSongPackage, decodeSongFile } from "../../../src/risa/songPackage";
+import { planRisaSongImport } from "../../../src/risaSongImport";
+import { backupSavPath } from "../../../src/tracker/liveSav";
 import { RisaRom, serializeRit, parseRit, decodeThemeFromRom, isBankPopulated, bankToModel, KIT_BANK_SIZE } from "../../../src/risa/rom";
-import { readOverrides as readRisaOverrides, type RisaAssetOverride } from "../../../src/risaAssetsRole";
+import { applyOverridesToRom as applyRisaOverrides, readOverrides as readRisaOverrides, type RisaAssetOverride } from "../../../src/risaAssetsRole";
 import {
   BlipToasterRom,
   blipToasterSettingsSysex,
@@ -138,6 +139,7 @@ export interface MenuContext {
   // Open the Songs "import from a .sav" picker (validate the source against the cart's console, then show a
   // checkbox list) — owned by useSongImport, wired from App like the project modals.
   beginSongImport: (sys: SystemView, source: Uint8Array) => void;
+  showSongNotice?: (title: string, body: string) => void;
   /** Show the LSDj HD player for a system (a full-window view; Esc closes it). Owned by App. */
   openLsdjHd: (systemId: number) => void;
 }
@@ -1270,8 +1272,12 @@ interface RitAssetOps {
  *  message. Returning null here lets the caller fall back to the base ROM's own bank, which is both useful
  *  (that is the asset the cart will actually boot with once the dead override is removed) and what the LSDj
  *  copy of these actions has always done. */
-const readLinked = (be: HostBackend, path: string | undefined): Uint8Array | null =>
-  path ? be.readFile(path) : null;
+function readLinked(be: HostBackend, ov: RisaAssetOverride | undefined): Uint8Array | null {
+  const bytes = ov?.path ? be.readFile(ov.path) : null;
+  if (!bytes || ov?.type !== "kit" || ov.risongKit === undefined) return bytes;
+  try { return decodeSongFile(bytes, be).kits.get(ov.risongKit) ?? null; }
+  catch { return null; }
+}
 
 const ritOverrides = (sys: SystemView, role: string): RisaAssetOverride[] =>
   readRisaOverrides(roleConfig(sys.roles, role));
@@ -1301,9 +1307,9 @@ function exportRitAsset(
       if (theme) bytes = new TextEncoder().encode(JSON.stringify(serializeRit(theme), null, 2) + "\n");
     } else if (kind === "kit") {
       // The linked bank if overridden, else the base ROM's 8 KB DMC bank — either is a ready-to-link .rkit.
-      bytes = readLinked(be, ov?.path) ?? ops.openRom(be, sys.romPath)?.getKitBank(slot) ?? null;
+      bytes = readLinked(be, ov) ?? ops.openRom(be, sys.romPath)?.getKitBank(slot) ?? null;
     } else {
-      bytes = readLinked(be, ov?.path) ?? ops.openRom(be, sys.romPath)?.getChrFontSlot(slot) ?? null;
+      bytes = readLinked(be, ov) ?? ops.openRom(be, sys.romPath)?.getChrFontSlot(slot) ?? null;
     }
     if (bytes && bytes.length) be.writeFileAtomic(path, bytes);
   });
@@ -1811,45 +1817,99 @@ function tryOp(fn: () => Uint8Array): Uint8Array | null {
   }
 }
 
-// risa song file I/O: a `.risong` is the raw self-describing song record — the `.lsdsng` analog (song only,
-// no kits). Export writes songRecordBytes; Replace/Add inject the record via the byte-level catalog ops.
-function risaExportSong(ctx: MenuContext, sys: SystemView, index: number, name: string): void {
+// Risa song files share the ROM patcher's package format (record + DPCM kits).
+function risaSongAction(ctx: MenuContext, fn: () => void): void {
+  try { fn(); }
+  catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (ctx.showSongNotice) ctx.showSongNotice("Song operation failed", message);
+    else console.log(`[risa-songs] ${message}`);
+  }
+}
+
+function risaEffectiveRom(ctx: MenuContext, sys: SystemView): Uint8Array {
   const be = ctx.stores.backend;
-  browseThen(ctx, { title: `Export song ${index}`, patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` }, (path) => {
-    const bytes = ctx.stores.project.systems.readSram(sys.id);
-    if (!bytes) return;
-    const record = songRecordBytes(bytes, index);
-    if (record) be.writeFileAtomic(path, record);
-  });
+  const base = be.readFile(sys.romPath);
+  if (!base) throw new Error("Cannot read the song's ROM");
+  const overrides = readRisaOverrides(sys.roles.find((r) => r.kind === "risa-assets")?.config);
+  if (!overrides.length) return base;
+  return applyRisaOverrides(base, overrides, be, (_override, message) => { throw new Error(message); });
+}
+
+function risaExportRecord(ctx: MenuContext, sys: SystemView, path: string, index?: number): void {
+  const be = ctx.stores.backend;
+  const bytes = ctx.stores.project.systems.readSram(sys.id);
+  if (!bytes) throw new Error("Cannot read the running song");
+  const record = index === undefined ? workingSongRecord(bytes) : songRecordBytes(bytes, index);
+  if (!record) throw new Error("Cannot read this song record");
+  // Re-export can change package kit indices after an import remaps them.
+  // Replacing a linked package would invalidate persisted kit overrides.
+  const destination = be.canonicalize(path);
+  for (const system of ctx.stores.project.systems.view()) for (const role of system.roles) {
+    const overrides = role.config.overrides;
+    if (Array.isArray(overrides) && overrides.some((ov) =>
+      typeof ov?.path === "string" && be.canonicalize(ov.path) === destination))
+      throw new Error("This file supplies assets to the project. Export to a new filename.");
+  }
+  const file = encodeSongPackage(record, risaEffectiveRom(ctx, sys), be, index);
+  if (!be.writeFileAtomic(path, file)) throw new Error("Could not write the song package");
+}
+
+function risaImportFile(ctx: MenuContext, sys: SystemView, path: string, targetSlot?: number): void {
+  const be = ctx.stores.backend;
+  const systems = ctx.stores.project.systems;
+  const current = systems.view().find((s) => s.id === sys.id);
+  if (!current) throw new Error("The cartridge changed while choosing a song file");
+  sys = current;
+  const file = be.readFile(path), liveSram = systems.readSram(sys.id);
+  if (!file || !liveSram) throw new Error("Cannot read the song file or running cartridge");
+  const overrides = readRisaOverrides(sys.roles.find((r) => r.kind === "risa-assets")?.config);
+  const plan = planRisaSongImport({ file, path, effectiveRom: risaEffectiveRom(ctx, sys), overrides, liveSram, targetSlot }, be);
+  if (plan.addedKits && !sys.roles.some((r) => r.kind === "risa-assets"))
+    throw new Error("The cartridge cannot install this song's sample kits");
+  const target = resolveSavPath(sys.romPath, sys.savSuffix, sys.savPath);
+  const previousSave = be.readFile(target);
+  try { be.writeFile(backupSavPath(target), liveSram); } catch { /* backup is best-effort */ }
+  if (!be.writeFileAtomic(target, plan.savBytes)) throw new Error("Could not save the imported song");
+  try {
+    if (plan.addedKits && !systems.setRoleConfig(sys.id, "risa-assets", { overrides: plan.overrides }))
+      throw new Error("Could not install the song's sample kits");
+    if (systems.loadSram(sys.id, target) === null) throw new Error("Could not reload the imported song");
+  } catch (error) {
+    // A rejected construction leaves the old core alive. Restore its disk
+    // image and role bindings rather than leaving a half-imported project.
+    let restored = true;
+    try {
+      if (plan.addedKits && !systems.setRoleConfig(sys.id, "risa-assets", { overrides })) restored = false;
+    } catch { restored = false; }
+    try {
+      if (!(previousSave ? be.writeFileAtomic(target, previousSave) : be.deleteFile(target))) restored = false;
+    } catch { restored = false; }
+    if (!restored) throw new Error("Import failed and could not fully restore the previous save and kit settings.");
+    throw error;
+  }
+}
+
+function risaExportSong(ctx: MenuContext, sys: SystemView, index: number, name: string): void {
+  browseThen(ctx, { title: `Export song ${index}`, patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` },
+    (path) => risaSongAction(ctx, () => risaExportRecord(ctx, sys, path, index)));
 }
 function risaReplaceSong(ctx: MenuContext, sys: SystemView, index: number): void {
-  const be = ctx.stores.backend;
-  browseThen(ctx, { title: `Replace song ${index}`, patterns: ["*.risong"] }, (path) => {
-    const data = be.readFile(path);
-    if (!data) return;
-    mutateSavBytes(ctx, sys, (sav) => tryOp(() => replaceSongRecordInSav(sav, index, data)));
-  });
+  browseThen(ctx, { title: `Replace song ${index}`, patterns: ["*.risong"] },
+    (path) => risaSongAction(ctx, () => risaImportFile(ctx, sys, path, index)));
 }
 function risaAddSong(ctx: MenuContext, sys: SystemView): void {
-  const be = ctx.stores.backend;
-  browseThen(ctx, { title: "Add Song", patterns: ["*.risong", ...SAV_PATTERNS] }, (path) => {
-    const data = be.readFile(path);
-    if (!data) return;
-    if (isSavPath(path)) ctx.beginSongImport(sys, data); // a whole .sav/.srm → the checkbox picker
-    else mutateSavBytes(ctx, sys, (sav) => tryOp(() => addSongRecordToSav(sav, data))); // a single .risong record
-  });
+  browseThen(ctx, { title: "Add Song", patterns: ["*.risong", ...SAV_PATTERNS] }, (path) => risaSongAction(ctx, () => {
+    if (isSavPath(path)) {
+      const data = ctx.stores.backend.readFile(path);
+      if (!data) throw new Error("Cannot read that save file");
+      ctx.beginSongImport(sys, data);
+    } else risaImportFile(ctx, sys, path);
+  }));
 }
-// The synthetic working-song row's actions. Export writes the LIVE working song (banks 0-3, encoded as a
-// record) to a `.risong`; Save to Catalog promotes it into a new saved slot + links it, so it stops being
-// unsaved and moves into the numbered list.
 function risaExportWorking(ctx: MenuContext, sys: SystemView, name: string): void {
-  const be = ctx.stores.backend;
-  browseThen(ctx, { title: "Export working song", patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` }, (path) => {
-    const bytes = ctx.stores.project.systems.readSram(sys.id);
-    if (!bytes) return;
-    const record = workingSongRecord(bytes);
-    if (record) be.writeFileAtomic(path, record);
-  });
+  browseThen(ctx, { title: "Export working song", patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` },
+    (path) => risaSongAction(ctx, () => risaExportRecord(ctx, sys, path)));
 }
 function risaSaveWorking(ctx: MenuContext, sys: SystemView): void {
   mutateSavBytes(ctx, sys, (sav) => tryOp(() => saveWorkingToCatalog(sav)));

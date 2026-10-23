@@ -78,12 +78,14 @@ export interface RoleType {
 
 /** The narrow Backend slice a load-time `onConstruct` hook may use: synthesize an LSDj SRAM image, check
  *  whether native will find a real sav on disk, read the base ROM (to patch it), and decode a PNG (for an
- *  LSDj font override). The full `Backend` satisfies this structurally, so the store passes itself. */
+ *  LSDj font override), or unpack a linked song package. The full `Backend`
+ *  satisfies this structurally, so the store passes itself. */
 export interface ConstructCaps {
   savFromJson(json: string): Uint8Array;
   fileExists(path: string): boolean;
   readFile(path: string): Uint8Array | null;
   pngDecode(bytes: Uint8Array): { width: number; height: number; rgba: Uint8Array } | null;
+  unzip?(bytes: Uint8Array): { name: string; bytes: Uint8Array }[] | null;
 }
 
 /** What a ROM provider inspects to decide feature roles: the platform + core, the ROM

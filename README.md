@@ -155,6 +155,10 @@ for behavior, validation and the remaining startup/audio-state limits.
 An unrecognised build of a cart is shown greyed out as `(Unsupported Version)`.
 
 ### Songs
+
+Risa `.risong` exports include their DPCM kits and work with the ROM patcher.
+Import reuses existing kits or adds them to free slots; older raw-record
+files remain readable. See [Risa song files](docs/risa-song-files.md).
 The `Songs` submenu lists the songs saved in the cart's battery, and each one can be
 loaded, exported, replaced or deleted, with `Add...` to import from a file and Move
 Up / Down to reorder. Everything is done on the cart's own save format, so files stay

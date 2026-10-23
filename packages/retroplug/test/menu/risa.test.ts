@@ -11,6 +11,10 @@ import { RisaRom } from "../../src/risa/rom";
 import { savBytes } from "../risa/fixtures";
 import { normalizeSaveContainer, listSongs, expandRecordToWorking, recordBytesAt, decodeRecord, CURRENT_LAYOUT, kSaveSize } from "../../src/risaSav";
 import { BANK_DATA, WRAM_BANK_SIZE, SAVE_CURRENT_ENTRY_OFFSET } from "../../src/risa/codec/constants";
+import { songDependencies, decodeSongFile, encodeSongPackage } from "../../src/risa/songPackage";
+import { addSongRecordToSav, workingSongRecord } from "../../src/risaSongOps";
+import { makeEmptySave } from "../../src/risa/codec/sav";
+import { songPackageFixture } from "../risa/songPackageFixture";
 import { risaSongCatalog } from "../../src/tracker";
 import { loadSongToWorkingInSav } from "../../src/risaSongOps";
 
@@ -398,6 +402,10 @@ test("Export... on the working row writes the working song as a .risong", async 
   const be = new MockBackend("/cfg");
   const stores = composeAppStores({ backend: be });
   const { items } = risaSystem(be, stores, unsavedWorkingBattery(true));
+  const full = RisaRom.fromBytes(risaRomFull());
+  const bank = full.getKitBank(0)!;
+  for (const kit of songDependencies(workingSongRecord(unsavedWorkingBattery(true))!).kits) full.setKit(kit, bank);
+  be.seed("/roms/song.nes", full.bytes());
   be.queueBrowse("/out/working.risong"); // the save-dialog pick
 
   findItem(workingRow(items), "risa-song-working-export")!.onSelect!();
@@ -405,7 +413,7 @@ test("Export... on the working row writes the working song as a .risong", async 
 
   const written = be.readFile("/out/working.risong");
   expect(written != null).toBe(true);
-  expect(decodeRecord(written!).name).toBe("BLUMARBL"); // the live working song, encoded as a record
+  expect(decodeRecord(decodeSongFile(written!, be).record).name).toBe("BLUMARBL"); // the live working song, encoded as a record
 });
 
 test("risa's Load guard offers a plain save (its working song carries its own name)", () => {
@@ -454,5 +462,119 @@ test("Risa reports DAW sync support from ROM capabilities", () => {
     const status = findItem(tracker, "risa-sync-status")!;
     expect(status.label).toBe(supported ? "DAW Sync: On" : "DAW Sync: Unsupported ROM");
     expect(status.disabled).toBe(true);
+  }
+});
+
+
+test("risong Export and Add round-trip sample kits through the menu without replacing the working song", async () => {
+  const be = new MockBackend("/cfg");
+  const stores = composeAppStores({ backend: be });
+  const fixture = songPackageFixture();
+  be.seed("/roms/source.nes", fixture.rom);
+  const source = stores.project.systems.addSystem("/roms/source.nes")!;
+  be.setSram(source, addSongRecordToSav(makeEmptySave(), fixture.record));
+  const notices: string[] = [];
+  const tree = (id: number) => buildInstanceMenu({ ...ctxOf(stores), system: stores.project.systems.view().find((s) => s.id === id)!,
+    showSongNotice: (_title, body) => notices.push(body) }).items;
+  const songs = (id: number) => submenuChildren(submenuChildren(tree(id), "inst-risa"), "risa-songs");
+  be.queueBrowse("/out/portable.risong");
+  findItem(submenuChildren(songs(source), "risa-song-0"), "risa-song-0-export")!.onSelect!();
+  await flush();
+  const file = be.readFile("/out/portable.risong")!;
+  expect(decodeSongFile(file, be).kits.size).toBe(1);
+
+  be.seed("/roms/target.nes", risaRomFull());
+  const target = stores.project.systems.addSystem("/roms/target.nes")!;
+  const before = unsavedWorkingBattery();
+  be.setSram(target, before);
+  be.queueBrowse("/out/portable.risong");
+  findItem(songs(target), "risa-song-add")!.onSelect!();
+  await flush();
+  const live = stores.project.systems.view().find((s) => s.romPath === "/roms/target.nes")!;
+  // The mock has no emulator; publish the seed handed to its replacement core.
+  be.setSram(live.id, new Uint8Array(be.constructCalls[be.constructCalls.length - 1].sramBytes!));
+  const bytes = stores.project.systems.readSram(live.id)!;
+  expect(listSongs(bytes).map((s) => s.name)).toEqual(["BLUMARBL", "PORTABLE"]);
+  expect(sameBytes(bytes.subarray(0, 0x8000), before.subarray(0, 0x8000))).toBe(true);
+  expect(sameBytes(be.readFile("/roms/target.sav.bak")!, before)).toBe(true);
+  expect(decodeRecord(recordBytesAt(bytes, CURRENT_LAYOUT, 1)!).instruments[0]![10]).toBe(1);
+  const patched = RisaRom.fromBytes(be.constructCalls[be.constructCalls.length - 1].romBytes!);
+  expect(sameBytes(patched.getKitBank(1)!, fixture.bank)).toBe(true);
+  expect(sameBytes(be.readFile("/roms/target.nes")!, risaRomFull())).toBe(true);
+
+  // Re-export uses the effective ROM, including kit overrides sourced from a package.
+  be.queueBrowse("/out/again.risong");
+  findItem(submenuChildren(songs(live.id), "risa-song-1"), "risa-song-1-export")!.onSelect!();
+  await flush();
+  expect(sameBytes(decodeSongFile(be.readFile("/out/again.risong")!, be).kits.get(1)!, fixture.bank)).toBe(true);
+
+  const kits = submenuChildren(submenuChildren(tree(live.id), "inst-risa"), "risa-kits");
+  be.queueBrowse("/out/imported.rkit");
+  actionsOf(kits, "risa-kit-1").find((a) => a.id === "risa-kit-1-export")!.onSelect();
+  await flush();
+  expect(sameBytes(be.readFile("/out/imported.rkit")!, fixture.bank)).toBe(true);
+
+  // Both the remapped song and another cartridge must preserve the linked source package.
+  for (const [id, slot] of [[live.id, 1], [source, 0]]) {
+    be.queueBrowse("/out/./portable.risong");
+    findItem(submenuChildren(songs(id), `risa-song-${slot}`), `risa-song-${slot}-export`)!.onSelect!();
+    await flush();
+    expect(notices[notices.length - 1].includes("Export to a new filename")).toBe(true);
+    expect(sameBytes(be.readFile("/out/portable.risong")!, file)).toBe(true);
+  }
+  expect(stores.project.systems.reloadSystem(live.id) !== null).toBe(true);
+  const reloaded = RisaRom.fromBytes(be.constructCalls[be.constructCalls.length - 1].romBytes!);
+  expect(sameBytes(reloaded.getKitBank(1)!, fixture.bank)).toBe(true);
+});
+
+test("a bad risong reports an error without editing the running song or save", async () => {
+  const be = new MockBackend("/cfg");
+  const stores = composeAppStores({ backend: be });
+  be.seed("/roms/bad.nes", risaRomFull());
+  const id = stores.project.systems.addSystem("/roms/bad.nes")!;
+  be.setSram(id, CATALOG());
+  be.seed("/in/broken.risong", new Uint8Array([0x50, 0x4b, 3, 4]));
+  const notices: string[] = [];
+  const tree = buildInstanceMenu({ ...ctxOf(stores), system: stores.project.systems.view()[0],
+    showSongNotice: (_title, body) => notices.push(body) });
+  const before = be.constructCalls.length;
+  be.queueBrowse("/in/broken.risong");
+  findItem(submenuChildren(submenuChildren(tree.items, "inst-risa"), "risa-songs"), "risa-song-add")!.onSelect!();
+  await flush();
+  expect(notices.length).toBe(1);
+  expect(be.constructCalls.length).toBe(before);
+  expect(be.readFile("/roms/bad.sav")).toBe(null);
+});
+
+
+test("a failed risong reload restores the previous save and kit bindings", async () => {
+  for (const hadSave of [false, true]) {
+    const be = new MockBackend("/cfg");
+    const stores = composeAppStores({ backend: be });
+    const fixture = songPackageFixture();
+    be.seed("/in/portable.risong", encodeSongPackage(fixture.record, fixture.rom, be));
+    be.seed("/roms/target.nes", risaRomFull());
+    const id = stores.project.systems.addSystem("/roms/target.nes")!;
+    const live = unsavedWorkingBattery();
+    be.setSram(id, live);
+    const disk = CATALOG(); // deliberately different from the unsaved live song
+    if (hadSave) be.seed("/roms/target.sav", disk);
+    const previousRoles = stores.project.systems.view()[0].roles;
+    let rejected = false;
+    be.constructSystem = (spec) => { rejected = spec.replaceId === id; return false; };
+    const notices: string[] = [];
+    const tree = buildInstanceMenu({ ...ctxOf(stores), system: stores.project.systems.view()[0],
+      showSongNotice: (_title, body) => notices.push(body) });
+    be.queueBrowse("/in/portable.risong");
+    findItem(submenuChildren(submenuChildren(tree.items, "inst-risa"), "risa-songs"), "risa-song-add")!.onSelect!();
+    await flush();
+    expect(rejected).toBe(true);
+    expect(notices).toEqual(["Could not reload the imported song"]);
+    expect(stores.project.systems.view()[0].id).toBe(id);
+    expect(stores.project.systems.view()[0].roles).toEqual(previousRoles);
+    expect(sameBytes(stores.project.systems.readSram(id)!, live)).toBe(true);
+    expect(sameBytes(be.readFile("/roms/target.sav.bak")!, live)).toBe(true);
+    if (hadSave) expect(sameBytes(be.readFile("/roms/target.sav")!, disk)).toBe(true);
+    else expect(be.readFile("/roms/target.sav")).toBe(null);
   }
 });

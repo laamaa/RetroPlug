@@ -6,7 +6,8 @@
 //
 // Delete / reorder / add-record / replace-record + record extraction (for export) treat records as
 // opaque; load-to-working expands a record's payload into the working-song RAM (banks 0-3) via the
-// song-payload codec (./risa/codec/working). The .risong file format (kit-aware zip) comes later.
+// song-payload codec (./risa/codec/working). Portable .risong packaging and kit
+// remapping live in ./risa/songPackage and ./risaSongImport.
 import {
   normalizeSaveContainer,
   chooseCatalogLayout,

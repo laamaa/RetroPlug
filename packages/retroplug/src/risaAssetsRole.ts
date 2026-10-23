@@ -5,13 +5,14 @@
 // manifest is the persisted source of truth (it round-trips through the project's role config). THEMES are
 // just palette indices, so they're stored INLINE as readable JSON (no file, no base64); FONTS are binary,
 // so they LINK to the `.chr` bank file on disk by path (read at construct). KITS are likewise binary, so
-// they LINK a pre-built 8 KB DMC bank (`.rkit`) by path — compilation is offline (the compileDmc RPC is on
+// they LINK a pre-built 8 KB DMC bank (`.rkit`) or a kit in a `.risong` package by path — compilation is offline (the compileDmc RPC is on
 // the harness facet, unreachable from the plugin), so a kit override just splices a ready-made bank with
 // rom.setKit (which dual-writes the resident metadata mirror). Applying reuses the pure-TS patcher (src/risa/rom).
 import type { RoleRegistry, ConstructCaps } from "./systemRoles";
 import type { ConstructSpec } from "./backend";
 import { z } from "./configSchema";
-import { RisaRom } from "./risa/rom";
+import { RisaRom, KIT_BANK_COUNT } from "./risa/rom";
+import { decodeSongFile } from "./risa/songPackage";
 import { applyRitOverride, ritOverrideSchema, CHR_BANK_SIZE, type RitAssetOverride } from "./ritAssetsRole";
 
 export const RISA_ASSETS_ROLE = "risa-assets";
@@ -21,10 +22,14 @@ export const RISA_CHR_BANK_SIZE = CHR_BANK_SIZE;
 /** One asset override for `slot`. THEMES are palette indices, stored INLINE as a readable `theme` object
  *  (name + 7 "0xNN" role indices — no file, no base64). FONTS and KITS are binary, so they LINK their file
  *  on disk by `path` (a `.chr` bank / a pre-built 8 KB `.rkit` DMC bank, read at construct). A kit override
- *  with `erase: true` empties the slot instead (a "delete this kit" override). `name` is a display label. */
-export type RisaAssetOverride = RitAssetOverride;
+ *  with `erase: true` empties the slot instead (a "delete this kit" override).
+ *  `risongKit` links a bank inside a song package. `name` is a display label. */
+export type RisaAssetOverride = RitAssetOverride & {
+  /** Kit source index in the .risong package linked by path. */
+  risongKit?: number;
+};
 
-const overrideSchema = ritOverrideSchema;
+const overrideSchema = ritOverrideSchema.extend({ risongKit: z.number().int().min(0).max(KIT_BANK_COUNT - 1).optional() });
 
 // The role config: just the override list (empty by default — a risa cart with no replacements).
 const risaAssetsSchema = z.object({
@@ -49,9 +54,22 @@ export function applyOverridesToRom(
 ): Uint8Array {
   const rom = RisaRom.fromBytes(baseBytes);
   if (!rom.isRisa) return baseBytes;
+  const packages = new Map<string, Map<number, Uint8Array>>();
   for (const ov of overrides) {
     try {
-      applyRitOverride(rom, ov, caps);
+      if (ov.type === "kit" && ov.risongKit !== undefined && !ov.erase) {
+        if (!ov.path) throw new Error("Song package kit has no linked file");
+        let kits = packages.get(ov.path);
+        if (!kits) {
+          const bytes = caps.readFile(ov.path);
+          if (!bytes) throw new Error(`Cannot read song package ${ov.path}`);
+          kits = decodeSongFile(bytes, caps).kits;
+          packages.set(ov.path, kits);
+        }
+        const bank = kits.get(ov.risongKit);
+        if (!bank) throw new Error(`Song package has no kit ${ov.risongKit}`);
+        rom.setKit(ov.slot, bank);
+      } else applyRitOverride(rom, ov, caps);
     } catch (e) {
       const message = (e as Error).message;
       // Logged only when nobody is listening. A caller that supplies onSkip owns the reporting, and a

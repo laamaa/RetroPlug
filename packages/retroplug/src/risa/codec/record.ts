@@ -35,6 +35,7 @@ import {
   SAVE_RECORD_VERSION_V3,
   SAVE_RECORD_VERSION_V2,
   SONG_NAME_LEN,
+  INST_TYPE_FIELD, INST_TYPE_DMC, INST_DMC_KIT_FIELD, INST_LAST_FIELD, SAVE_RECORD_VERSION_V4,
 } from "./constants";
 import { readU16, writeU16, decodeName, encodeName } from "./bytes";
 
@@ -71,14 +72,14 @@ function readBytes(bytes: Uint8Array, pos: number, len: number): Uint8Array {
 
 /** Decode a whole record (16-byte header + payload). Strict: the length header must equal the buffer
  *  length and the payload must consume exactly to the end (a faithful port of parseSongRecord). */
-export function decodeRecord(recordBytes: Uint8Array): RisaRecord {
+function parseRecord(recordBytes: Uint8Array, visitInstrument?: (index: number, offset: number) => void): RisaRecord {
   const bytes = recordBytes instanceof Uint8Array ? recordBytes : new Uint8Array(recordBytes);
   const length = readU16(bytes, 0);
   if (length !== bytes.length) throw new Error("Song record length header does not match archive data");
   if (length < SAVE_REC_HEADER) throw new Error("Song record is too short");
 
   const recordVersion = bytes[10];
-  if (recordVersion > SAVE_RECORD_VERSION) throw new Error(`Unsupported song record version ${recordVersion}`);
+  if (recordVersion < 1 || recordVersion > SAVE_RECORD_VERSION) throw new Error(`Unsupported song record version ${recordVersion}`);
 
   const parsed: RisaRecord = {
     recordVersion,
@@ -194,6 +195,7 @@ export function decodeRecord(recordBytes: Uint8Array): RisaRecord {
   pos += 8;
   for (let idx = 0; idx < INST_COUNT; idx++) {
     if (!bitIsSet(instBits, idx)) continue;
+    visitInstrument?.(idx, pos);
     parsed.instruments[idx] = readBytes(bytes, pos, INST_SIZE);
     pos += INST_SIZE;
   }
@@ -411,5 +413,22 @@ export function encodeRecord(rec: RisaRecord): Uint8Array {
     out.set(chunk, pos);
     pos += chunk.length;
   }
+  return out;
+}
+
+
+export function decodeRecord(recordBytes: Uint8Array): RisaRecord {
+  return parseRecord(recordBytes);
+}
+
+/** Rewrite kit indices in place on a copy, preserving every other record byte. */
+export function remapRecordDmcKits(record: Uint8Array, kits: ReadonlyMap<number, number>): Uint8Array {
+  const out = record.slice();
+  const kitField = record[10] >= SAVE_RECORD_VERSION_V4 ? INST_DMC_KIT_FIELD : INST_LAST_FIELD;
+  parseRecord(record, (_index, offset) => {
+    if (record[offset + INST_TYPE_FIELD] !== INST_TYPE_DMC) return;
+    const target = kits.get(record[offset + kitField]);
+    if (target !== undefined) out[offset + kitField] = target;
+  });
   return out;
 }
