@@ -52,7 +52,7 @@ import {
 import { encodeSongPackage, decodeSongFile } from "../../../src/risa/songPackage";
 import { planRisaSongImport } from "../../../src/risaSongImport";
 import { backupSavPath } from "../../../src/tracker/liveSav";
-import { RisaRom, serializeRit, parseRit, decodeThemeFromRom, isBankPopulated, bankToModel, KIT_BANK_SIZE } from "../../../src/risa/rom";
+import { RisaRom, serializeRit, parseRit, decodeThemeFromRom, bankToModel, validateKitBank, CHR_BANK_SIZE } from "../../../src/risa/rom";
 import { applyOverridesToRom as applyRisaOverrides, readOverrides as readRisaOverrides, type RisaAssetOverride } from "../../../src/risaAssetsRole";
 import {
   BlipToasterRom,
@@ -978,8 +978,20 @@ const overridesFor = (sys: SystemView, role: string): AssetOverride[] => readAss
 // Persist an override list + rebuild so onConstruct re-patches the effective ROM. setRoleConfig merges at the
 // top level, so this leaves any sibling key (BlipToaster's baked `settings`) alone.
 function writeOverrides(ctx: MenuContext, sys: SystemView, role: string, overrides: AssetOverride[]): void {
-  ctx.stores.project.systems.setRoleConfig(sys.id, role, { overrides });
-  ctx.stores.project.systems.reloadSystem(sys.id);
+  trackerFileAction(ctx, () => {
+    const systems = ctx.stores.project.systems;
+    const current = systems.view().find((s) => s.id === sys.id);
+    if (!current) throw new Error("The cartridge changed while choosing an asset");
+    const previous = overridesFor(current, role);
+    if (!systems.setRoleConfig(sys.id, role, { overrides })) throw new Error("Could not update the cartridge assets");
+    try {
+      if (systems.reloadSystem(sys.id) === null) throw new Error("Could not reload the cartridge assets");
+    } catch (error) {
+      if (!systems.setRoleConfig(sys.id, role, { overrides: previous }))
+        throw new Error("Could not restore the previous cartridge assets");
+      throw error;
+    }
+  });
 }
 
 function removeOverride(spec: AssetMenuSpec, ctx: MenuContext, sys: SystemView, kind: string, slot: number): void {
@@ -1004,7 +1016,10 @@ function addAsset(spec: AssetMenuSpec, ctx: MenuContext, sys: SystemView, type: 
   const used = new Set(effectiveAssets(spec.catalog.baseSlots(bytes, type.kind), overridesFor(sys, spec.catalog.assetRole), type.kind, type.noun).map((r) => r.slot));
   let slot = 0;
   while (slot < type.maxSlots && used.has(slot)) slot++;
-  if (slot >= type.maxSlots) return; // all slots full
+  if (slot >= type.maxSlots) {
+    trackerFileAction(ctx, () => { throw new Error(`No free ${type.noun.toLowerCase()} slot in this cartridge`); });
+    return;
+  }
   spec.replaceAsset(ctx, sys, type, slot);
 }
 
@@ -1266,17 +1281,14 @@ interface RitAssetOps {
   } | null;
 }
 
-/** An override's linked bank, or null when the link is broken. A `.rkit` / `.chr` override records a PATH,
- *  and the user is free to move or delete that file afterwards — at which point Export used to produce
- *  nothing at all, silently, because a null read fell through the `if (bytes && bytes.length)` guard with no
- *  message. Returning null here lets the caller fall back to the base ROM's own bank, which is both useful
- *  (that is the asset the cart will actually boot with once the dead override is removed) and what the LSDj
- *  copy of these actions has always done. */
-function readLinked(be: HostBackend, ov: RisaAssetOverride | undefined): Uint8Array | null {
-  const bytes = ov?.path ? be.readFile(ov.path) : null;
-  if (!bytes || ov?.type !== "kit" || ov.risongKit === undefined) return bytes;
-  try { return decodeSongFile(bytes, be).kits.get(ov.risongKit) ?? null; }
-  catch { return null; }
+/** Read the requested override; a broken link must not export another kit. */
+function readLinkedKit(be: HostBackend, ov: RisaAssetOverride): Uint8Array {
+  const bytes = ov.path ? be.readFile(ov.path) : null;
+  if (!bytes) throw new Error(`Cannot read linked asset ${ov.path ?? "file"}`);
+  if (ov.risongKit === undefined) return bytes;
+  const bank = decodeSongFile(bytes, be).kits.get(ov.risongKit);
+  if (!bank) throw new Error(`Song package has no kit ${ov.risongKit}`);
+  return bank;
 }
 
 const ritOverrides = (sys: SystemView, role: string): RisaAssetOverride[] =>
@@ -1295,7 +1307,8 @@ function exportRitAsset(
   const kind = type.kind;
   const ov = ritOverrides(sys, ops.role).find((o) => o.type === kind && o.slot === slot);
   const defaultName = `${sanitizeName(label)}${type.ext}`;
-  browseThen(ctx, { title: `Export ${kind} ${slot}`, patterns: type.patterns, saving: true, defaultName }, (path) => {
+  browseThen(ctx, { title: `Export ${kind} ${slot}`, patterns: type.patterns, saving: true, defaultName }, (path) => trackerFileAction(ctx, () => {
+    assertUnlinkedExport(ctx, path);
     let bytes: Uint8Array | null = null;
     if (kind === "theme") {
       // The theme comes from the inline override, or the base ROM decoded; emit a .rit (readable JSON).
@@ -1307,12 +1320,14 @@ function exportRitAsset(
       if (theme) bytes = new TextEncoder().encode(JSON.stringify(serializeRit(theme), null, 2) + "\n");
     } else if (kind === "kit") {
       // The linked bank if overridden, else the base ROM's 8 KB DMC bank — either is a ready-to-link .rkit.
-      bytes = readLinked(be, ov) ?? ops.openRom(be, sys.romPath)?.getKitBank(slot) ?? null;
+      bytes = ov ? readLinkedKit(be, ov) : ops.openRom(be, sys.romPath)?.getKitBank(slot) ?? null;
+      if (bytes) validateKitBank(bytes);
     } else {
-      bytes = readLinked(be, ov) ?? ops.openRom(be, sys.romPath)?.getChrFontSlot(slot) ?? null;
+      bytes = (ov?.path ? be.readFile(ov.path) : null) ?? ops.openRom(be, sys.romPath)?.getChrFontSlot(slot) ?? null;
     }
-    if (bytes && bytes.length) be.writeFileAtomic(path, bytes);
-  });
+    if (!bytes?.length) throw new Error(`Cannot read ${kind} ${slot}`);
+    if (!be.writeFileAtomic(path, bytes)) throw new Error(`Could not export ${kind}`);
+  }));
 }
 
 // Replace theme/font/kit `slot` from a picked file: validate it, record the override (theme INLINE / font +
@@ -1320,26 +1335,24 @@ function exportRitAsset(
 function replaceRitAsset(ops: RitAssetOps, ctx: MenuContext, sys: SystemView, type: AssetTypeInfo, slot: number): void {
   const be = ctx.stores.backend;
   const kind = type.kind;
-  browseThen(ctx, { title: `Replace ${kind} ${slot}`, patterns: type.patterns }, (path) => {
+  browseThen(ctx, { title: `Replace ${kind} ${slot}`, patterns: type.patterns }, (path) => trackerFileAction(ctx, () => {
     const data = be.readFile(path);
-    if (!data) return;
+    if (!data) throw new Error(`Cannot read ${path}`);
     let entry: RisaAssetOverride;
-    try {
-      if (kind === "theme") {
-        const { theme } = parseRit(JSON.parse(new TextDecoder().decode(data))); // throws on a bad .rit
-        entry = { type: "theme", slot, name: theme.name.trim() || stem(path), theme };
-      } else if (kind === "kit") {
-        if (data.length !== KIT_BANK_SIZE || !isBankPopulated(data)) return; // a .rkit is exactly one populated 8 KB DMC bank
-        entry = { type: "kit", slot, name: bankToModel(data).name.trim() || stem(path), path };
-      } else {
-        if (data.length !== 0x2000) return; // a .chr is exactly one 8 KB CHR bank
-        entry = { type: "font", slot, name: stem(path), path };
-      }
-    } catch {
-      return; // malformed .rit / unreadable → leave the ROM untouched
+    if (kind === "theme") {
+      const { theme } = parseRit(JSON.parse(new TextDecoder().decode(data)));
+      entry = { type: "theme", slot, name: theme.name.trim() || stem(path), theme };
+    } else if (kind === "kit") {
+      validateKitBank(data);
+      entry = { type: "kit", slot, name: bankToModel(data).name.trim() || stem(path), path };
+    } else {
+      if (data.length !== CHR_BANK_SIZE) throw new Error("A .chr must be exactly 8 KB");
+      entry = { type: "font", slot, name: stem(path), path };
     }
-    writeOverrides(ctx, sys, ops.role, [...ritOverrides(sys, ops.role).filter((o) => !(o.type === kind && o.slot === slot)), entry]);
-  });
+    const current = ctx.stores.project.systems.view().find((s) => s.id === sys.id);
+    if (!current) throw new Error("The cartridge changed while choosing an asset");
+    writeOverrides(ctx, current, ops.role, [...ritOverrides(current, ops.role).filter((o) => !(o.type === kind && o.slot === slot)), entry]);
+  }));
 }
 
 const lsdjAssetSpec: AssetMenuSpec = { id: "lsdj", catalog: lsdjAssetCatalog, exportAsset, replaceAsset };
@@ -1817,13 +1830,23 @@ function tryOp(fn: () => Uint8Array): Uint8Array | null {
   }
 }
 
-// Risa song files share the ROM patcher's package format (record + DPCM kits).
-function risaSongAction(ctx: MenuContext, fn: () => void): void {
+// Export must preserve source files that the project needs to rebuild its ROMs.
+function assertUnlinkedExport(ctx: MenuContext, path: string): void {
+  const destination = ctx.stores.backend.canonicalize(path);
+  for (const system of ctx.stores.project.systems.view()) for (const role of system.roles) {
+    const overrides = role.config.overrides;
+    if (Array.isArray(overrides) && overrides.some((ov) =>
+      typeof ov?.path === "string" && ctx.stores.backend.canonicalize(ov.path) === destination))
+      throw new Error("This file supplies assets to the project. Export to a new filename.");
+  }
+}
+
+function trackerFileAction(ctx: MenuContext, fn: () => void): void {
   try { fn(); }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (ctx.showSongNotice) ctx.showSongNotice("Song operation failed", message);
-    else console.log(`[risa-songs] ${message}`);
+    if (ctx.showSongNotice) ctx.showSongNotice("File operation failed", message);
+    else console.log(`[tracker-files] ${message}`);
   }
 }
 
@@ -1842,15 +1865,7 @@ function risaExportRecord(ctx: MenuContext, sys: SystemView, path: string, index
   if (!bytes) throw new Error("Cannot read the running song");
   const record = index === undefined ? workingSongRecord(bytes) : songRecordBytes(bytes, index);
   if (!record) throw new Error("Cannot read this song record");
-  // Re-export can change package kit indices after an import remaps them.
-  // Replacing a linked package would invalidate persisted kit overrides.
-  const destination = be.canonicalize(path);
-  for (const system of ctx.stores.project.systems.view()) for (const role of system.roles) {
-    const overrides = role.config.overrides;
-    if (Array.isArray(overrides) && overrides.some((ov) =>
-      typeof ov?.path === "string" && be.canonicalize(ov.path) === destination))
-      throw new Error("This file supplies assets to the project. Export to a new filename.");
-  }
+  assertUnlinkedExport(ctx, path);
   const file = encodeSongPackage(record, risaEffectiveRom(ctx, sys), be, index);
   if (!be.writeFileAtomic(path, file)) throw new Error("Could not write the song package");
 }
@@ -1892,14 +1907,14 @@ function risaImportFile(ctx: MenuContext, sys: SystemView, path: string, targetS
 
 function risaExportSong(ctx: MenuContext, sys: SystemView, index: number, name: string): void {
   browseThen(ctx, { title: `Export song ${index}`, patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` },
-    (path) => risaSongAction(ctx, () => risaExportRecord(ctx, sys, path, index)));
+    (path) => trackerFileAction(ctx, () => risaExportRecord(ctx, sys, path, index)));
 }
 function risaReplaceSong(ctx: MenuContext, sys: SystemView, index: number): void {
   browseThen(ctx, { title: `Replace song ${index}`, patterns: ["*.risong"] },
-    (path) => risaSongAction(ctx, () => risaImportFile(ctx, sys, path, index)));
+    (path) => trackerFileAction(ctx, () => risaImportFile(ctx, sys, path, index)));
 }
 function risaAddSong(ctx: MenuContext, sys: SystemView): void {
-  browseThen(ctx, { title: "Add Song", patterns: ["*.risong", ...SAV_PATTERNS] }, (path) => risaSongAction(ctx, () => {
+  browseThen(ctx, { title: "Add Song", patterns: ["*.risong", ...SAV_PATTERNS] }, (path) => trackerFileAction(ctx, () => {
     if (isSavPath(path)) {
       const data = ctx.stores.backend.readFile(path);
       if (!data) throw new Error("Cannot read that save file");
@@ -1909,7 +1924,7 @@ function risaAddSong(ctx: MenuContext, sys: SystemView): void {
 }
 function risaExportWorking(ctx: MenuContext, sys: SystemView, name: string): void {
   browseThen(ctx, { title: "Export working song", patterns: ["*.risong"], saving: true, defaultName: `${sanitizeName(name)}.risong` },
-    (path) => risaSongAction(ctx, () => risaExportRecord(ctx, sys, path)));
+    (path) => trackerFileAction(ctx, () => risaExportRecord(ctx, sys, path)));
 }
 function risaSaveWorking(ctx: MenuContext, sys: SystemView): void {
   mutateSavBytes(ctx, sys, (sav) => tryOp(() => saveWorkingToCatalog(sav)));

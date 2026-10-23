@@ -9,7 +9,7 @@ import {
   INST_DMC_KIT_FIELD, INST_LAST_FIELD, INST_EMPTY, CHAIN_EMPTY, PHRASE_EMPTY,
   SAVE_MAGIC_VER, SAVE_RECORD_VERSION_V4, SAVE_RECORD_VERSION_V5,
 } from "./codec/constants";
-import { RisaRom, KIT_BANK_COUNT, KIT_BANK_SIZE, isBankPopulated } from "./rom";
+import { RisaRom, KIT_BANK_COUNT, validateKitBank } from "./rom";
 import { getKitFingerprintPair, getLegacyKitSemanticFingerprint } from "./kitFingerprint";
 
 const MANIFEST = "manifest.json";
@@ -78,6 +78,7 @@ export function encodeSongPackage(record: Uint8Array, romBytes: Uint8Array,
   const kits = dependencies.kits.map((index) => {
     const bytes = rom.getKitBank(index);
     if (!bytes || !rom.isKitPopulated(index)) throw new Error(`Song references empty ROM kit ${index}`);
+    validateKitBank(bytes);
     const path = `kits/${index}.bin`;
     entries.push({ name: path, bytes });
     return { sourceIndex: index, path, ...getKitFingerprintPair(bytes) };
@@ -121,8 +122,8 @@ export function decodeSongFile(file: Uint8Array, archive: ArchiveReader): SongFi
   for (const kit of manifest.kits) {
     if (kits.has(kit.sourceIndex)) throw new Error(`Duplicate bundled kit ${kit.sourceIndex}`);
     const bytes = files.get(kit.path);
-    if (!bytes || bytes.length !== KIT_BANK_SIZE || !isBankPopulated(bytes))
-      throw new Error(`Bundled kit ${kit.sourceIndex} is missing or invalid`);
+    if (!bytes) throw new Error(`Bundled kit ${kit.sourceIndex} is missing`);
+    validateKitBank(bytes);
     const actual = getKitFingerprintPair(bytes);
     if (actual.exact.hex !== kit.exact.hex) throw new Error(`Bundled kit ${kit.sourceIndex} checksum mismatch`);
     if (actual.semantic.hex !== kit.semantic.hex && getLegacyKitSemanticFingerprint(bytes).hex !== kit.semantic.hex)

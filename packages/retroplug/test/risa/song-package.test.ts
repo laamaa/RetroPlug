@@ -80,6 +80,21 @@ test("corrupt kits and missing required kits are rejected before import", () => 
   expect(() => decodeSongFile(new Uint8Array([16, 0, 0]), be)).toThrow();
 });
 
+test("packaged kits with valid fingerprints still reject out-of-range sample data", () => {
+  const { be, args, record, rom } = setup();
+  const entries = be.unzip(args.file)!;
+  const bank = entries.find((e) => e.name === "kits/5.bin")!.bytes;
+  bank[0x1f00] = 0xfe;
+  const manifest = entries.find((e) => e.name === "manifest.json")!;
+  const json = JSON.parse(new TextDecoder().decode(manifest.bytes));
+  Object.assign(json.kits[0], getKitFingerprintPair(bank));
+  manifest.bytes = new TextEncoder().encode(JSON.stringify(json));
+  expect(() => planRisaSongImport({ ...args, file: be.zip(entries)! }, be)).toThrow("outside");
+  const source = RisaRom.fromBytes(rom);
+  source.setKit(5, bank);
+  expect(() => encodeSongPackage(record, source.bytes(), be)).toThrow("outside");
+});
+
 test("older semantic fingerprint manifests remain compatible", () => {
   const { be, args, bank } = setup();
   const entries = be.unzip(args.file)!;

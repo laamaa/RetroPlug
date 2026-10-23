@@ -37,3 +37,14 @@ Validation:
 - Regenerate the independent fixture with
   `RISA_SRC=/path/to/risa node scripts/gen-risa-song-package-oracle.mjs` from
   `packages/retroplug/`.
+
+Kit files:
+
+- **Kits > Export...** writes a ready-to-use 8 KB `.rkit` bank. **Add...** uses
+  the first free kit slot; **Replace...** changes the selected slot. Both link
+  the file into the project and preserve the working song.
+- Missing links, invalid banks, full kit regions, and failed writes report an
+  error. A failed cartridge reload restores the previous asset bindings.
+- `.rkit` is RetroPlug's raw-bank format. The browser ROM patcher's `.rik`
+  archives contain kit settings and source samples and are currently unsupported
+  by RetroPlug; use a patched ROM or `.risong` package to transfer those kits.

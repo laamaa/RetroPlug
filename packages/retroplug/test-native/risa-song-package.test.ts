@@ -38,7 +38,7 @@ test("native ZIP codec round-trips a portable Risa song and its linked kit", () 
   expect(listSongs(plan.savBytes)[0].name).toBe("PORTABLE");
 });
 
-test("package imports survive a real Risa boot and project reload with their DPCM kit", () => {
+test("package and raw kit imports survive a real Risa boot and project reload with DPCM output", () => {
   const be = createRealBackend();
   const romPath = __RISA_SRC__ + "/build/risa-pal.nes";
   const base = be.readFile(romPath);
@@ -56,27 +56,32 @@ test("package imports survive a real Risa boot and project reload with their DPC
   const loaded = loadSongToWorkingInSav(plan.savBytes, 0)!;
   const savPath = __CONFIG_DIR__ + "/playable.sav";
   expect(be.writeFileAtomic(savPath, loaded)).toBe(true);
-  const project = new ProjectStore(be, new RecentStore(be), buildAppRegistry());
-  const dsp = createDspRuntime(), audio = createAudioDriver();
-  expect(dsp.loadKernel(dsp.compileScript(__DSP_KERNEL_BUNDLE__)!)).toBe(true);
-  project.setOnSystemsChange(() => syncDspFromStore(project, dsp));
-  const id = project.systems.adopt({ romPath, savPath, roles: [
-    { kind: "mesen", config: {} }, { kind: "risa-assets", config: { overrides: plan.overrides } },
-  ] }, { sramBytes: loaded })!;
-  try {
-    audio.renderAudio(500);
-    expect(workingSongName(be.readSram(id)!)).toBe("PORTABLE");
-    const archive = project.exportBytes()!;
-    expect(project.loadBytes(archive).kind).toBe("loaded");
-    audio.setPpq(0); audio.setBpm(120); audio.setTransport(true);
-    const pcm = audio.renderAudio(1000);
-    audio.setTransport(false); audio.renderAudio(200);
-    expect(pcm.some((sample) => Math.abs(sample) > 0.00001)).toBe(true);
-    const live = project.systems.view()[0];
-    expect(live.roles.find((r) => r.kind === "risa-assets")!.config.overrides).toEqual(plan.overrides);
-    expect(listSongs(be.readSram(live.id)!)[0].name).toBe("PORTABLE");
-  } finally {
-    for (const sys of project.systems.view()) project.systems.removeSystem(sys.id);
+  const rawPath = __CONFIG_DIR__ + "/playable.rkit";
+  expect(be.writeFile(rawPath, f.bank)).toBe(true);
+  const rawOverrides = plan.overrides.map(({ risongKit: _sourceIndex, ...ov }) => ({ ...ov, path: rawPath }));
+  for (const overrides of [plan.overrides, rawOverrides]) {
+    const project = new ProjectStore(be, new RecentStore(be), buildAppRegistry());
+    const dsp = createDspRuntime(), audio = createAudioDriver();
+    expect(dsp.loadKernel(dsp.compileScript(__DSP_KERNEL_BUNDLE__)!)).toBe(true);
+    project.setOnSystemsChange(() => syncDspFromStore(project, dsp));
+    const id = project.systems.adopt({ romPath, savPath, roles: [
+      { kind: "mesen", config: {} }, { kind: "risa-assets", config: { overrides } },
+    ] }, { sramBytes: loaded })!;
+    try {
+      audio.renderAudio(500);
+      expect(workingSongName(be.readSram(id)!)).toBe("PORTABLE");
+      const archive = project.exportBytes()!;
+      expect(project.loadBytes(archive).kind).toBe("loaded");
+      audio.setPpq(0); audio.setBpm(120); audio.setTransport(true);
+      const pcm = audio.renderAudio(1000);
+      audio.setTransport(false); audio.renderAudio(200);
+      expect(pcm.some((sample) => Math.abs(sample) > 0.00001)).toBe(true);
+      const live = project.systems.view()[0];
+      expect(live.roles.find((r) => r.kind === "risa-assets")!.config.overrides).toEqual(overrides);
+      expect(listSongs(be.readSram(live.id)!)[0].name).toBe("PORTABLE");
+    } finally {
+      for (const sys of project.systems.view()) project.systems.removeSystem(sys.id);
+    }
   }
 });
 

@@ -79,6 +79,19 @@ export function isBankPopulated(bank: Uint8Array): boolean {
   return bank[KIT_MAGIC_OFFSET] === KIT_MAGIC;
 }
 
+/** Validate raw banks before linking or exporting them. A populated marker alone
+ * does not guarantee that the DMC index stays inside the sample region. */
+export function validateKitBank(bank: Uint8Array): void {
+  if (bank.length !== KIT_BANK_SIZE) throw new Error("A .rkit must be exactly 8 KB");
+  if (!isBankPopulated(bank)) throw new Error("Not a populated DPCM kit bank");
+  for (let slot = 0; slot < KIT_SLOT_COUNT; slot++) {
+    const pos = KIT_INDEX_OFFSET + slot * KIT_INDEX_ENTRY;
+    if (bank[pos] === KIT_SLOT_EMPTY) continue;
+    const end = bank[pos] * SAMPLE_ALIGN + bank[pos + 1] * LENGTH_STEP + 1;
+    if (end > KIT_SAMPLE_REGION) throw new Error(`Kit sample ${slot} extends outside the DPCM sample region`);
+  }
+}
+
 /** Derive the three metadata-mirror rows for a kit slot from a bank's own bytes (no model needed) —
  *  risa's rom_upgrade.js updateRomKitMetadataFromBank. Used so a bank splice can update the mirror. */
 export function deriveMetaFromBank(bank: Uint8Array): {

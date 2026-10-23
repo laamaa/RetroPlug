@@ -12,7 +12,7 @@
 import type { ConstructCaps } from "./systemRoles";
 import type { RisaTheme } from "./risa/rom";
 import { z } from "./configSchema";
-import { encodeThemeRecord, encodeThemeName, normalizeTheme, KIT_BANK_SIZE, CHR_BANK_SIZE, isBankPopulated } from "./risa/rom";
+import { encodeThemeRecord, encodeThemeName, normalizeTheme, CHR_BANK_SIZE, validateKitBank } from "./risa/rom";
 
 // One font slot = one 8 KB CHR bank, on both carts. Re-exported rather than redeclared: risa/rom already
 // owns it, and BlipToaster's role was already importing it from there.
@@ -77,8 +77,7 @@ export function applyRitOverride(rom: RitAssetRom, ov: RitAssetOverride, caps: C
     if (!ov.path) throw new Error(`kit override slot ${ov.slot}: no path`);
     const bank = caps.readFile(ov.path);
     if (!bank) throw new Error(`kit override slot ${ov.slot}: cannot read ${ov.path}`);
-    if (bank.length !== KIT_BANK_SIZE) throw new Error(`kit override slot ${ov.slot}: .rkit must be exactly 8 KB`);
-    if (!isBankPopulated(bank)) throw new Error(`kit override slot ${ov.slot}: not a populated kit bank`);
+    validateKitBank(bank);
     rom.setKit(ov.slot, bank); // dual-writes the resident metadata mirror
     return;
   }
