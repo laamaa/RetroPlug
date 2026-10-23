@@ -26,16 +26,10 @@ export function isRisaRomHeader(header: Uint8Array): boolean {
   return true;
 }
 
-// The host-sync capability marker. Every normal risa build from 2.3.0 on embeds the ASCII tag "RISAxyz"
-// within the first 0x150 bytes of the .nes (the RomContext header prefix, ROLE_HEADER_LEN), where xyz are
-// the three version digits: 2.3.0 ships "RISA230". risa generates it from APP_VERSION_TEXT, so the marker
-// both identifies the dormant, UI-less N8-FIFO receive path (F9-locate / FA / F8 / FC) that the `risa-sync`
-// DSP role drives from the DAW transport, AND stamps the version - readable from the header prefix alone,
-// unlike the "RISA V<x.y.z>" tag identifyRisaVersion() scans for, which sits deep in the PRG.
-//
-// Pre-2.3.0 releases carry no marker and have no receive path, so they simply don't get the role. (An
-// early prototype used a "RISA-SYNC" tag and a 4-byte arm packet; 2.3.0 rejects that arm outright, so
-// there is one protocol, not two.)
+// RISAxyz is the version tag in the first 0x150 file bytes, generated from
+// APP_VERSION_TEXT. DAW sync additionally requires RSEEK1; RREADY1 optionally
+// exposes the silent-preparation handshake. The deeper "RISA Vx.y.z" marker
+// remains the whole-ROM version identifier for older builds.
 const RISA_MARKER = "RISA";
 const RISA_MARKER_DIGITS = 3;
 const RISA_MARKER_SCAN_LEN = 0x150;
@@ -65,9 +59,9 @@ export function risaMarkerVersion(header: Uint8Array): string | null {
   return null;
 }
 
-/** True if the ROM advertises the risa host-sync receive path. */
+/** True if the ROM supports song-aware host sync. Version-only ROMs are unsupported. */
 export function isRisaSyncRom(header: Uint8Array): boolean {
-  return risaMarkerVersion(header) !== null;
+  return risaMarkerVersion(header) !== null && isRisaResolvedSeekRom(header);
 }
 
 const RISA_SEEK_MARKER = [0x52, 0x53, 0x45, 0x45, 0x4b, 0x31]; // RSEEK1

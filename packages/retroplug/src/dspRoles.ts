@@ -20,7 +20,7 @@ import {
   toGbSerialByte,
 } from "./lsdjKeyboardMap";
 import { arduinoboyDecodeSerialOut, arduinoboyMasterSyncBlock, type ArduinoboyState, type MasterSyncState } from "./lsdjArduinoboy";
-import { RISA_PPQN, RISA_START, RISA_CLOCK, RISA_STOP, risaLocate, risaArmPacket } from "./risaSync";
+import { RISA_PPQN, RISA_START, RISA_CLOCK, RISA_STOP } from "./risaSync";
 import { SMS_SYNC_PPQN, SMS_SYNC_COUNTER_MOD, syncLevelsFor, type SmsSyncMachine } from "./smsSync";
 import { RISA_START_LATENCY_MS } from "./risa/startLatency";
 import { registerControllerRole } from "./controllerRole";
@@ -222,41 +222,14 @@ const lsdjSync: SystemBehavior = (c) => {
   }
 };
 
-// risa-sync selects prepared, resolved or legacy structural seeking from ROM
-// capability facts. Every arm is a FIFO barrier; the target clock is primed by
-// the ROM, so external clocks start at target + 1. The legacy fallback retains
-// its five-byte F9 52 arm and fixed-grid position mapping.
-const RISA_SEEK_TOL = 1e-3; // quarters — contiguous block edges meet exactly; a seek/loop jump far exceeds this.
+// Only resolved-capable ROMs may be driven from the DAW. Stale project
+// roles without that capability stay inert instead of guessing a position.
+const RISA_SEEK_TOL = 1e-3;
 const risaSync: SystemBehavior = (c) => {
-  if (c.config.resolvedSeek && c.config.prepareAddress !== undefined && c.config.generationAddress !== undefined) { risaPreparedSync(c); return; }
-  if (c.config.resolvedSeek) { risaResolvedSync(c); return; }
-  const st = c.state as { prevT?: boolean; ppqEnd?: number };
-  const b = c.block;
-  const playing = b.transport;
-  const prevT = st.prevT ?? false;
-
-  // Re-arm on a fresh start, or on a ppqStart discontinuity while playing — a seek/loop needs a new locate,
-  // and the arm gates risa's playback + discards the old position's queued clocks.
-  const seek = st.ppqEnd !== undefined && Math.abs(b.ppqStart - st.ppqEnd) > RISA_SEEK_TOL;
-  if (playing && (!prevT || seek)) {
-    const loc = risaLocate(b.ppqStart);
-    c.pushCoreBytes(0, risaArmPacket(loc), true); // F9 52 songRow chainRow tickOffset, flushing the FIFO
-    c.pushCoreBytes(0, [RISA_START]); // FA
-    c.setNextTick(loc.absoluteClock + 1); // risa primes the armed clock itself; we resume after it
-  } else if (!playing && prevT) {
-    c.pushCoreBytes(0, [RISA_STOP]); // FC
-  }
-
-  if (playing) c.eachTick(RISA_PPQN, (_t, off) => c.pushCoreBytes(off, [RISA_CLOCK])); // F8 at 24 PPQN
-
-  // Predict the next contiguous block's ppqStart for seek detection (quarters this block spans).
-  st.prevT = playing;
-  if (playing) {
-    const samplesPerQuarter = (b.sampleRate * 60) / b.tempo;
-    st.ppqEnd = b.ppqStart + (samplesPerQuarter > 0 ? b.frames / samplesPerQuarter : 0);
-  } else {
-    st.ppqEnd = undefined;
-  }
+  if (!c.config.resolvedSeek) return;
+  if (c.config.prepareAddress !== undefined && c.config.generationAddress !== undefined)
+    risaPreparedSync(c);
+  else risaResolvedSync(c);
 };
 
 // One fixed look-ahead window covers worker preparation, FIFO delivery and

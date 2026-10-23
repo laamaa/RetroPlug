@@ -28,7 +28,7 @@ import { lsdjRomTool } from "./sessions/lsdj-rom";
 import { risaRomTool } from "./sessions/risa-rom";
 import { blipToasterRomTool } from "./sessions/bliptoaster-rom";
 import { n8LoadTool } from "./sessions/n8-load";
-import { n8BridgeTool, n8SyncTool } from "./sessions/n8-bridge";
+import { n8BridgeTool } from "./sessions/n8-bridge";
 import { n8PlayTool } from "./sessions/n8-play";
 import { analyzeCaptureTool } from "./sessions/analyze-capture";
 import { grabFrameTool } from "./sessions/grab-frame";
@@ -44,7 +44,6 @@ export const tools: CliTool[] = [
   blipToasterRomTool,
   n8LoadTool,
   n8BridgeTool,
-  n8SyncTool,
   n8PlayTool,
   analyzeCaptureTool,
   grabFrameTool,

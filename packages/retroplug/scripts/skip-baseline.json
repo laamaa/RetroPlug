@@ -32,18 +32,6 @@
    "skipped": 13,
    "total": 13
   },
-  "dsp-risa-sync": {
-   "skipped": 2,
-   "total": 2
-  },
-  "dsp-risa-sync-grid": {
-   "skipped": 1,
-   "total": 1
-  },
-  "dsp-risa-sync-locate": {
-   "skipped": 2,
-   "total": 2
-  },
   "dsp-threaded": {
    "skipped": 1,
    "total": 1

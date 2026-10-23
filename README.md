@@ -146,8 +146,8 @@ Unlike LSDj, risa and smsggdj need no sync mode picked: they follow the host tra
 directly, so pressing play in your DAW plays the cart in time.
 
 Risa builds advertising `RSEEK1` also support song-aware DAW seeking. RetroPlug
-reads the live song and resolves each track on a background worker; older ROMs
-retain the original structural locate. Builds also advertising `RREADY1` wait
+reads the live song and resolves each track on a background worker. Older ROMs
+show `DAW Sync: Unsupported ROM` and receive no automatic transport. Builds also advertising `RREADY1` wait
 for silent seek preparation and use a 100 ms delay reported to the DAW for
 compensation. See [Risa seeking](docs/risa-seeking.md)
 for behavior, validation and the remaining startup/audio-state limits.
@@ -278,7 +278,7 @@ build/bin/retroplug-cli render song.gbc        # LSDj: auto-length stereo mix ->
 | `render` | Render a ROM/SAV to a WAV (full mix or per-channel stems) |
 | `test` / `run` | Strip and run a directory of TypeScript tests, or a single session file |
 | `lsdj-rom` / `risa-rom` / `bliptoaster-rom` | Inspect, extract and patch a cart's kits, palettes, themes and fonts |
-| `n8-load` / `n8-bridge` / `n8-sync` / `n8-play` | Drive a physical Everdrive N8 Pro over USB |
+| `n8-load` / `n8-bridge` / `n8-play` | Drive a physical Everdrive N8 Pro over USB |
 | `analyze-capture` / `grab-frame` | Measure a hardware audio capture; grab a NES video frame off a capture card |
 | `launchpad-probe` | Drive a real Launchpad and report what it sends back |
 

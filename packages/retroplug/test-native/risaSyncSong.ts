@@ -1,12 +1,11 @@
 // A risa "metronome" save: ONE noise hit per beat, for host-sync timing checks.
 //
-// risa's row grid is fixed at six clocks of 24 PPQN, i.e. FOUR rows per quarter note, so a note every
+// This fixture uses a six-clock groove at 24 PPQN: FOUR rows per quarter note, so a note every
 // fourth row is exactly one hit per beat whatever the DAW tempo. Under host sync risa's own project
 // tempo is irrelevant - the host's F8 stream is what advances it - which is the point: if the hits stay
 // on the DAW's beat grid, the sync is locked.
 //
-// Shared by the native grid test (dsp-risa-sync-grid) and the real-Reaper fixture (author-risa-rplg), so
-// both measure the same song.
+// Used by the real-Reaper fixture (author-risa-rplg).
 import { initWorkingDefaults, makeEmptySave } from "../src/risaSav";
 
 // Working-image geometry (src/seq_data.h; mirrored in src/risa/codec/constants.ts). Bank 1 holds chains,
@@ -26,7 +25,7 @@ const CHAIN_EMPTY = 0xff;
 const NOTE_EMPTY = 0xff;
 const INST_EMPTY = 0xff;
 
-/** Rows per quarter note on risa's fixed six-clock grid (24 PPQN / 6). */
+/** Rows per quarter note for this fixture's six-clock groove (24 PPQN / 6). */
 export const RISA_ROWS_PER_BEAT = 4;
 
 /** A 64 KB risa battery whose LIVE working song hits the noise channel once per beat. */

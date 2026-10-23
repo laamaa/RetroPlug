@@ -38,7 +38,8 @@ What it does **not** abstract is role registration; each console registers its o
 An LSDj-class NES tracker. RetroPlug supports its sav/song model, its asset editing (kits as NES
 DPCM, themes, fonts), and host sync — the cart follows the DAW **transport**, with no MIDI involved:
 the `risa-sync` role turns transport into risa's arm / start / 24-PPQN clock / stop byte stream over
-the emulated EverDrive N8 FIFO. Layout support covers risa 2.3.0.
+the emulated EverDrive N8 FIFO. DAW sync requires the `RSEEK1` ROM capability;
+older ROMs keep song/asset support but receive no transport.
 
 - Code: `src/risa/` (codec + ROM + runtime), `src/risaRole.ts`, `src/risaSync.ts`,
   `src/tracker/risa*Catalog.ts`. The DMC kit codec is native (`src/risa/RisaDmcCodec.cpp`).

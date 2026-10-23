@@ -1,14 +1,10 @@
-// `retroplug-cli n8-bridge` / `n8-sync` - stream live MIDI to a physical Everdrive N8 Pro over USB, entirely
-// in TS (these replaced the native subcommands). `n8-bridge` forwards raw MIDI to the cart FIFO (for the
-// BlipToaster ROM); `n8-sync` translates a MIDI clock/transport into risa host-sync bytes (via the pure-TS
-// RisaSyncTranslator). Both are long-running: they open the serial (createN8) + MIDI (createMidiClient)
-// facets, call keepAlive(), and run an event-driven poll loop (setInterval) until Ctrl-C - the native
-// launcher pumps it (see cli/main.cpp).
+// Stream raw MIDI to a physical Everdrive N8 Pro's cart FIFO (e.g. BlipToaster).
+// Risa transport uses resolved song positions and has no MIDI clock translator.
 import type { CliTool } from "../tools";
 import type { Session } from "../session";
 import { keepAlive, exitProcess } from "../session";
 import { createSerialClient, createMidiClient } from "../../src/realBackend";
-import { createN8, RisaSyncTranslator, type SerialPortInfo } from "../../src/n8";
+import { createN8, type SerialPortInfo } from "../../src/n8";
 
 // txiki provides this libuv-backed global at runtime (deps/.../txiki timers); the TS lib config omits it.
 declare function setInterval(handler: () => void, ms: number): number;
@@ -40,11 +36,8 @@ function printInputs(): void {
   for (const n of inputs) console.log(`  ${n}`);
 }
 
-// The shared bridge loop: poll MIDI, transform each message to output bytes, forward to the cart FIFO with an
-// optional constant-delay lookahead (arrival order == release order). `transform` is the ONLY difference
-// between the raw bridge and the risa-sync bridge. Long-running: sets keepAlive() and returns; the native
-// pump drives the setInterval poll until Ctrl-C.
-function runBridge(args: string[], clientName: string, transform: (bytes: Uint8Array, out: number[]) => void): void {
+// Forward MIDI to the cart FIFO, optionally delaying every message equally.
+function runBridge(args: string[]): void {
   const lookaheadMs = Math.max(0, Number(flag(args, "--lookahead-ms") ?? 0) | 0);
 
   const serial = createSerialClient();
@@ -54,15 +47,15 @@ function runBridge(args: string[], clientName: string, transform: (bytes: Uint8A
 
   const midi = createMidiClient();
   const midiIn = flag(args, "--midi-in") ?? "";
-  if (!midi.open(clientName, midiIn)) throw new Error("no MIDI system available");
+  if (!midi.open("RetroPlug N8", midiIn)) throw new Error("no MIDI system available");
 
   keepAlive(); // opt into the native run-until-Ctrl-C pump
 
-  const queue: { due: number; bytes: number[] }[] = [];
+  const queue: { due: number; bytes: Uint8Array }[] = [];
   let msgCount = 0;
   let byteCount = 0;
-  const forward = (bytes: number[]): void => {
-    n8.edio.fifoWR(Uint8Array.from(bytes));
+  const forward = (bytes: Uint8Array): void => {
+    n8.edio.fifoWR(bytes);
     msgCount++;
     byteCount += bytes.length;
   };
@@ -70,11 +63,9 @@ function runBridge(args: string[], clientName: string, transform: (bytes: Uint8A
   setInterval(() => {
     const now = Date.now();
     for (const bytes of midi.poll()) {
-      const out: number[] = [];
-      transform(bytes, out);
-      if (out.length === 0) continue; // non-transport MIDI (sync) yields nothing
-      if (lookaheadMs > 0) queue.push({ due: now + lookaheadMs, bytes: out });
-      else forward(out);
+      if (bytes.length === 0) continue;
+      if (lookaheadMs > 0) queue.push({ due: now + lookaheadMs, bytes });
+      else forward(bytes);
     }
     while (queue.length > 0 && queue[0].due <= now) forward(queue.shift()!.bytes);
   }, 1);
@@ -103,16 +94,6 @@ const BRIDGE_HELP = [
   ...COMMON_FLAGS,
 ].join("\n");
 
-const SYNC_HELP = [
-  "usage: retroplug-cli n8-sync [--list] [--midi-in <name>] [--serial <port>] [--lookahead-ms <N>]",
-  "",
-  "  Turn an incoming MIDI clock/transport (Start/Continue/Stop + 24-PPQN clock, optional Song Position)",
-  "  into risa's host-sync protocol on a physical N8, so a risa cart plays locked to the DAW. Runs until",
-  "  Ctrl-C. Load a risa ROM first (retroplug-cli n8-load).",
-  "",
-  ...COMMON_FLAGS,
-].join("\n");
-
 export const n8BridgeTool: CliTool = {
   name: "n8-bridge",
   summary: "stream live MIDI to a physical Everdrive N8 Pro over USB",
@@ -124,24 +105,6 @@ export const n8BridgeTool: CliTool = {
       exitProcess(0);
       return;
     }
-    runBridge(args, "RetroPlug N8", (bytes, out) => {
-      for (const b of bytes) out.push(b); // raw forward
-    });
-  },
-};
-
-export const n8SyncTool: CliTool = {
-  name: "n8-sync",
-  summary: "drive risa host-sync on a physical Everdrive N8 Pro from a MIDI clock",
-  help: SYNC_HELP,
-  longRunning: true,
-  run(_s: Session, args: string[]): void {
-    if (args.includes("--list")) {
-      printInputs();
-      exitProcess(0);
-      return;
-    }
-    const translator = new RisaSyncTranslator();
-    runBridge(args, "RetroPlug N8 Sync", (bytes, out) => translator.onMessage(bytes, out));
+    runBridge(args);
   },
 };

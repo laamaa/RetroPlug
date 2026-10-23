@@ -1971,7 +1971,7 @@ interface TrackerUi {
 }
 const TRACKER_UI: Record<string, TrackerUi> = {
   lsdj: { song: lsdjSongSpec, asset: lsdjAssetSpec, extras: lsdjExtras },
-  risa: { song: risaSongSpec, asset: risaAssetSpec },
+  risa: { song: risaSongSpec, asset: risaAssetSpec, extras: risaExtras },
   smsggdj: { song: smsggdjSongSpec, asset: smsggdjAssetSpec },
   bliptoaster: { asset: blipToasterAssetSpec, extras: blipToasterExtras },
 };
@@ -1988,8 +1988,13 @@ function trackerChildren(t: TrackerIntegration, ctx: MenuContext, sys: SystemVie
   ];
 }
 
+function risaExtras(_ctx: MenuContext, sys: SystemView): MenuItem[] {
+  const supported = sys.roles.some((r) => r.kind === "risa-sync" && r.config.resolvedSeek);
+  return [action("risa-sync-status", supported ? "DAW Sync: On" : "DAW Sync: Unsupported ROM", () => {}, true)];
+}
+
 // LSDj's sync cyclers (Mode / Tempo Divisor / Auto Start) + a separator — the one per-console tracker extra
-// not yet unified (risa has no sync knobs).
+// not yet unified.
 function lsdjExtras(ctx: MenuContext, sys: SystemView): MenuItem[] {
   const systems = ctx.stores.project.systems;
   const cfg = roleConfig(sys.roles, "lsdj-sync") ?? {};

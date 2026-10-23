@@ -439,3 +439,20 @@ test("risa Save & Load commits the working song then loads, in one cold boot", (
   expect(risaSongCatalog.workingSongDirty!(out)).toBe(false); // nothing left uncommitted
   expect(be.constructCalls.length - writesBefore).toBe(1); // save+load is ONE byte-op
 });
+
+
+test("Risa reports DAW sync support from ROM capabilities", () => {
+  for (const supported of [false, true]) {
+    const be = new MockBackend("/cfg");
+    const stores = composeAppStores({ backend: be });
+    const rom = risaRom();
+    rom.set(new TextEncoder().encode(supported ? "RISA251RSEEK1" : "RISA230"), 16);
+    be.seed("/roms/sync.nes", rom);
+    const id = stores.project.systems.addSystem("/roms/sync.nes")!;
+    const sys = stores.project.systems.view().find((s) => s.id === id)!;
+    const tracker = submenuChildren(buildInstanceMenu({ ...ctxOf(stores), system: sys }).items, "inst-risa");
+    const status = findItem(tracker, "risa-sync-status")!;
+    expect(status.label).toBe(supported ? "DAW Sync: On" : "DAW Sync: Unsupported ROM");
+    expect(status.disabled).toBe(true);
+  }
+});

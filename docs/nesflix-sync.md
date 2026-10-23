@@ -97,7 +97,7 @@ configured rate, stop on exit). Two clean ways to produce it, both reusing exist
   and lets the `nesflix-sync` DSP role emit the clock exactly as it would under a DAW - the
   role is transport-driven and does not care that the transport is a CLI variable rather than a
   host. Zero new byte-generation code.
-- **Direct byte generator (TS).** A CLI session (like the existing `n8-sync` tool) emits the
+- **Direct byte generator (TS).** A CLI session (like the existing `n8-bridge` tool) emits the
   bytes itself on a timer. More explicit, and the natural base for Mode 2.
 
 This alone is a self-contained "play the GIF at a musical rate on a real NES" appliance.
@@ -135,8 +135,8 @@ fine in TS on a Pi, or drop to C++ if a heavier onset/beat tracker is wanted lat
 
 ### What this needs beyond Options 2 + 3
 
-- A CLI session/tool (`retroplug-cli nesflix` or similar, long-running like `n8-sync`) that owns
-  the core + optional N8 mirror and runs the chosen generator. Mostly reuse of `n8-sync` +
+- A CLI session/tool (`retroplug-cli nesflix` or similar, long-running like `n8-bridge`) that owns
+  the core + optional N8 mirror and runs the chosen generator. Mostly reuse of `n8-bridge` +
   `setCoreByteSink` + the long-session infra.
 - For Mode 2 external audio: the audio-in facet (new). Mode 2 closed-loop and Mode 1 need no new
   native seam.

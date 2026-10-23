@@ -1,7 +1,9 @@
 # Plan: drive a real Everdrive N8 Pro from RetroPlug (MIDI in -> USB serial)
 
-Status (2026-09-21): **SHIPPED and hardware-verified** as the `n8-bridge` / `n8-load` / `n8-sync` CLI
-subcommands, against a real N8 Pro. Kept as the design rationale.
+Status (2026-09-21): **SHIPPED and hardware-verified** as the `n8-bridge` / `n8-load` CLI
+subcommands, against a real N8 Pro. Kept as the design rationale. The former
+Risa-specific `n8-sync` command was retired with its inaccurate structural
+seeking; generic raw MIDI forwarding remains supported.
 Goal: take MIDI into RetroPlug and forward it over USB to a physical Everdrive N8 Pro running the
 BlipToaster NES ROM, so a MIDI controller / DAW plays the real NES. One-way (host -> cart); BlipToaster is
 MIDI-in only.

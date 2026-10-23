@@ -1,8 +1,8 @@
 # Risa DAW seeking
 
 Risa ROMs with both `RISAxyz` and `RSEEK1` in the first `$150` file bytes
-support resolved, independent-track seeking. RetroPlug selects it automatically;
-older ROMs retain the legacy structural locate. Capability is re-derived on
+support resolved, independent-track seeking. RetroPlug selects it automatically.
+Older ROMs show `DAW Sync: Unsupported ROM`; they receive no DAW transport. Capability is re-derived on
 project restore and ROM reload, rather than trusted from saved configuration.
 
 The plugin now forwards the host's absolute quarter-note position before
@@ -79,8 +79,9 @@ cover startup preparation within the allowance; the ROM still quantizes service
 to safe subframes. Sustained notes, envelopes,
 tables, delays and oscillator phase are not replayed from the past; inherited
 timbre can restart on the located row. Sample-exact DAW onset/listening and
-physical N8 USB behavior need separate qualification. The standalone MIDI/SPP
-translator still uses the legacy structural packet.
+physical N8 USB behavior need separate qualification. The old `F9 52` structural
+operation and Risa-specific `n8-sync` MIDI/SPP translator have been removed.
+The generic `n8-bridge` raw MIDI command remains available for other ROMs.
 
 Validation added:
 

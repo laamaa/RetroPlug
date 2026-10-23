@@ -30,7 +30,7 @@ import {
 import { type CommonSettings, DEFAULT_COMMON_SETTINGS, clampGain, commonSettingsSchema } from "./systemSettings";
 import type { RoleRegistry, RoleInstance } from "./systemRoles";
 import { blipToasterChip, needsChipLabelScan, BLIPTOASTER_CHIP_SCAN_LEN } from "./bliptoaster/romDetect";
-import { isRisaResolvedSeekRom, risaReadyStatus } from "./risa/romDetect";
+import { isRisaSyncRom, risaReadyStatus } from "./risa/romDetect";
 import { roleConfigForNative, LsdjSyncMode } from "./settingsEnums";
 
 // How much ROM header to read for the role providers (title lives at 0x134).
@@ -336,7 +336,8 @@ export class SystemsStore {
     const src = findById(this.entries, id);
     if (!src) return null;
     const override = savPathOverride ?? src.savPath;
-    const roles = this.withDerivedRoleFacts(src.roles, src.romPath, src.embeddedRom);
+    // A ROM reload can gain sync capability as well as lose it.
+    const roles = this.withMissingFeatureRoles(src.roles, src.core, src.platform, src.romPath, src.embeddedRom);
     const systemRole = roles.find((r) => r.kind === src.core);
     const newId = allocSystemId();
     // Route through the load-time role hooks too, so a reload re-applies e.g. LSDj asset overrides
@@ -786,12 +787,12 @@ export class SystemsStore {
     // Repair older projects and ROM swaps in both directions.
     if (romPath && !embeddedRom && roles.some((r) => r.kind === "risa-sync")) {
       const header = readRoleHeader(this.backend, "nes", romPath);
-      const resolvedSeek = isRisaResolvedSeekRom(header);
+      const resolvedSeek = isRisaSyncRom(header);
       const ready = risaReadyStatus(header);
-      roles = roles.map((r) => r.kind === "risa-sync" &&
-        (resolvedSeek || r.config.resolvedSeek !== undefined)
-        ? { ...r, config: { ...r.config, resolvedSeek,
-            prepareAddress: ready?.prepareAddress, generationAddress: ready?.generationAddress } } : r);
+      roles = roles.flatMap((r) => r.kind !== "risa-sync" ? [r] : resolvedSeek
+        ? [{ ...r, config: { ...r.config, resolvedSeek: true,
+            prepareAddress: ready?.prepareAddress, generationAddress: ready?.generationAddress } }]
+        : []);
     }
     const i = roles.findIndex((r) => r.kind === "bliptoaster");
     if (i < 0 || !romPath || embeddedRom) return roles;

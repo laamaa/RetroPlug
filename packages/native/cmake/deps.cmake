@@ -19,10 +19,10 @@ add_subdirectory(${CMAKE_SOURCE_DIR}/deps/rtmidi ${CMAKE_BINARY_DIR}/rtmidi EXCL
 retroplug_silence_dep_warnings(rtmidi)
 
 # --- retroplug-cli N8 transport facets: serial + live MIDI -> the TS N8 stack ------------------------
-# The N8 tools (n8-load / n8-bridge / n8-sync) are all TS now (packages/retroplug/src/n8 + cli/sessions/):
+# The N8 tools (n8-load / n8-bridge / n8-play) are all TS now (packages/retroplug/src/n8 + cli/sessions/):
 # native only provides the thin transport facets they ride on - the serial byte transport (SerialRpcService
 # over wjwwood/serial) and the live-MIDI-input facet (MidiRpcService over RtMidi). No C++ Edio/menu/translator
-# here anymore (the TS edio.ts + risaSyncTranslator.ts replace them). ON by default; turn OFF to keep
+# here anymore (the TS N8 implementation replaces them). ON by default; turn OFF to keep
 # retroplug-cli (and thus the CI `all` build) free of the RtMidi/serial deps (ALSA dev headers on Linux) -
 # the N8 tools then just fail to find a device.
 option(RETROPLUG_N8_BRIDGE "Build the retroplug-cli N8 transport facets (links RtMidi + serial)" ON)

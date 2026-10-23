@@ -36,14 +36,16 @@ test("Risa seek capability follows the current ROM across saved-project loads", 
       { kind: "risa-sync", config: { resolvedSeek: !capable } },
     ] });
     expect(id !== null).toBe(true);
-    const sync = store.view().find((v) => v.id === id)!.roles.find((r) => r.kind === "risa-sync")!;
-    expect(sync.config.resolvedSeek).toBe(capable);
+    const sync = store.view().find((v) => v.id === id)!.roles.find((r) => r.kind === "risa-sync");
+    expect(!!sync).toBe(capable);
+    if (sync) expect(sync.config.resolvedSeek).toBe(true);
     rom.fill(0, 0x10, 0x30);
     rom.set(new TextEncoder().encode(capable ? "RISA230" : "RISA251RSEEK1"), 0x10);
     be.seed("/roms/risa.nes", rom);
     const reloaded = store.reloadSystem(id!);
-    const next = store.view().find((v) => v.id === reloaded)!.roles.find((r) => r.kind === "risa-sync")!;
-    expect(next.config.resolvedSeek).toBe(!capable);
+    const next = store.view().find((v) => v.id === reloaded)!.roles.find((r) => r.kind === "risa-sync");
+    expect(!!next).toBe(!capable);
+    if (next) expect(next.config.resolvedSeek).toBe(true);
   }
 });
 

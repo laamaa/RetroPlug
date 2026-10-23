@@ -53,7 +53,7 @@ test("risaMarkerVersion reads the RISAxyz version; null / false when absent", ()
   expect(risaMarkerVersion(withSyncMarker(RISA_HEADER, "2.4.1"))).toBe("2.4.1");
   expect(risaMarkerVersion(withSyncMarker(RISA_HEADER, "2.3.0", 100))).toBe("2.3.0"); // found anywhere in the prefix
   expect(risaMarkerVersion(RISA_HEADER)).toBe(null); // a bare 16-byte header carries no marker
-  expect(isRisaSyncRom(withSyncMarker(RISA_HEADER))).toBeTruthy();
+  expect(isRisaSyncRom(withSyncMarker(RISA_HEADER))).toBeFalsy(); // version alone cannot sync
   expect(isRisaSyncRom(RISA_HEADER)).toBeFalsy();
 });
 
@@ -71,12 +71,19 @@ test("risaMarkerVersion needs three digits, so a bare 'RISA' string is not a mar
   expect(risaMarkerVersion(twoDigits)).toBe(null);
 });
 
-test("the provider attaches risa-sync only to a marker-bearing risa ROM", () => {
+test("the provider requires resolved seeking and preserves assets on older ROMs", () => {
   const reg = buildAppRegistry();
-  const syncRoles = reg.defaultRoles("mesen", "nes", withSyncMarker(RISA_HEADER)).map((r) => r.kind);
+  const resolved = withSyncMarker(RISA_HEADER, "2.5.1");
+  resolved.set(new TextEncoder().encode("RSEEK1"), 32);
+  expect(isRisaSyncRom(resolved)).toBeTruthy();
+  const syncRoles = reg.defaultRoles("mesen", "nes", resolved).map((r) => r.kind);
   expect(syncRoles.includes("risa")).toBeTruthy();
   expect(syncRoles.includes("risa-sync")).toBeTruthy();
   expect(syncRoles.includes("nes-n8-midi")).toBeTruthy(); // sync + host-note passthrough coexist on the FIFO
+
+  const legacyRoles = reg.defaultRoles("mesen", "nes", withSyncMarker(RISA_HEADER)).map((r) => r.kind);
+  expect(legacyRoles.includes("risa-sync")).toBeFalsy();
+  expect(legacyRoles.includes("risa-assets")).toBeTruthy();
 
   const plainRoles = reg.defaultRoles("mesen", "nes", RISA_HEADER).map((r) => r.kind);
   expect(plainRoles.includes("risa")).toBeTruthy(); // still a risa ROM

@@ -10,7 +10,7 @@
 import type { RoleRegistry, RomContext, RoleInstance } from "./systemRoles";
 import { LsdjSyncMode } from "./settingsEnums";
 import { isRisaRomHeader, isRisaSyncRom } from "./risa";
-import { isRisaResolvedSeekRom, risaReadyStatus } from "./risa/romDetect";
+import { risaReadyStatus } from "./risa/romDetect";
 import { isBlipToasterRomHeader, blipToasterChip } from "./bliptoaster/romDetect";
 import { isSmsggdjRom } from "./smsSync";
 
@@ -64,13 +64,13 @@ export function registerRomProviders(registry: RoleRegistry): void {
 
   // risa (the LSDj-style NES/MMC5 tracker) → the `risa` marker role that gates the Songs menu, plus the
   // `risa-assets` role holding non-destructive theme/font ROM overrides. Detected by its iNES 2.0 header
-  // fingerprint (MMC5 + 64 KB battery) since NES ROMs carry no title field. A sync-capable build (the
-  // "RISA-SYNC" header marker) additionally gets the `risa-sync` DSP role that drives its N8-FIFO host-sync
-  // receive path from the DAW transport; older risa builds without the marker are unaffected.
+  // fingerprint (MMC5 + 64 KB battery) since NES ROMs carry no title field.
+  // Only builds with resolved seeking get DAW transport; older ROMs keep
+  // their songs/assets without the inaccurate structural-position fallback.
   registry.registerRomProvider((rom: RomContext): RoleInstance[] => {
     if (rom.platform !== "nes" || !isRisaRomHeader(rom.header)) return [];
     const roles: RoleInstance[] = [{ kind: "risa", config: {} }, { kind: "risa-assets", config: { overrides: [] } }];
-    if (isRisaSyncRom(rom.header)) roles.push({ kind: "risa-sync", config: isRisaResolvedSeekRom(rom.header) ? { resolvedSeek: true, ...risaReadyStatus(rom.header) } : {} });
+    if (isRisaSyncRom(rom.header)) roles.push({ kind: "risa-sync", config: { resolvedSeek: true, ...risaReadyStatus(rom.header) } });
     return roles;
   });
 

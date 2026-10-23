@@ -1,7 +1,7 @@
 # N8 Pro over-USB: cool things we can do with SRAM (and beyond)
 
 Brainstorm of what the Everdrive N8 Pro USB link opens up now that we can read + write cart
-SRAM and drive host sync. Grouped by how far off each is. Companion to
+SRAM and forward raw MIDI. Grouped by how far off each is. Companion to
 [n8-bridge-plan.md](n8-bridge-plan.md) (the sync bridge roadmap).
 
 ## What we can already do (the primitives)
@@ -14,14 +14,15 @@ SRAM and drive host sync. Grouped by how far off each is. Companion to
   menu copy it into cart SRAM at hand-off. Direct `memWR(ADDR_SRM)` also works but corrupts the running
   menu, so the gamedata route is the safe one.
 - **SD file API** - read / write / list files and directories (`Edio::listDir`, `fileOpen`/`fileWrite`).
-- **Host-sync playback** - `retroplug-cli n8-sync` turns a MIDI clock/transport into risa's arm/clock/stop
-  protocol; verified audible on the real 2A03.
+- **Raw MIDI playback** - `retroplug-cli n8-bridge` forwards MIDI to a compatible
+  ROM such as BlipToaster. Risa hardware sync needs a resolved-position sender;
+  the inaccurate structural `n8-sync` translator has been retired.
 - **RetroPlug codecs** - full risa + LSDj `.sav` decode/encode, runtime readers, and the `compileDmc`
   DPCM kit compiler, all reusable against bytes we pull off the cart.
 - **Menu VRAM dump** (`*v`) - 2 KB nametable + 16 B palette, but only while the **menu** is running
   (menu-only screen, not a running game's).
 - **Tooling today:** `retroplug-cli n8-load` (`--srm` / `--dump-sram` / `--ls` / `--sram-only`),
-  `n8-sync`, `n8-bridge`.
+  `n8-bridge`, `n8-play`.
 
 ---
 
@@ -97,4 +98,4 @@ VRAM+CHR -> PNG pipeline that #5 needs for a running game.
 3. **Savestate dump experiment** (#5) - cheap to probe, and it cracks the risa-screen-over-USB itch.
 
 Everything here reuses existing pieces (`Edio` memRD/memWR + file API, the risa/LSDj codecs, `compileDmc`,
-`n8-sync`); nothing needs new hardware.
+`n8-bridge`); nothing needs new hardware.

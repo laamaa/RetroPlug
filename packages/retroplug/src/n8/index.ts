@@ -34,7 +34,6 @@ export type { N8DirEntry } from "./edio";
 export { N8Menu } from "./n8Menu";
 export { decodeMapConfig, resolveChrWindow, chrBankAddr, describeChrWindow } from "./mapConfig";
 export type { N8MapConfig, N8Mirroring, ChrWindow, ChrBankSource } from "./mapConfig";
-export { RisaSyncTranslator } from "./risaSyncTranslator";
 export { loadRom, dumpSram, writeSramDirect, writeMemDirect, assertGameRegion, baseName } from "./n8Load";
 export type { LoadOptions, LoadResult } from "./n8Load";
 export type { SerialTransport, OpenSerialPort, SerialPortInfo, SerialClient } from "./transport";

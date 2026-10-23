@@ -101,8 +101,9 @@ public:
     }
 
 private:
-    // An arm (5) + start (1) + a beat of clocks (24) is 30; 48 leaves headroom for a long block.
-    static constexpr std::uint32_t kMaxBytesPerBlock = 48;
+    // A resolved arm (48), start (1), and a beat of clocks (24) fit together.
+    // Longer bursts are explicitly marked truncated.
+    static constexpr std::uint32_t kMaxBytesPerBlock = 80;
     // ~95 s of ring at 512 frames / 44.1 kHz, drained every 200 ms - orders of magnitude of slack.
     static constexpr std::uint64_t kRingSize = 8192;
     static constexpr int           kFlushMs  = 200;
@@ -125,7 +126,7 @@ private:
         std::fprintf(file_, "#   block frames rate tempo ppqStart transport | frame:BYTES ...\n");
         std::fprintf(file_, "#\n");
         std::fprintf(file_, "# 'transport' is the host's play flag; ppqStart is its playhead at the block start.\n");
-        std::fprintf(file_, "# risa bytes: F9 52 ss cc tt = arm+locate, FA = start, F8 = clock, FC = stop.\n");
+        std::fprintf(file_, "# risa bytes: F9 53 mask + five 9-byte records = resolved arm, FA = start, F8 = clock, FC = stop.\n");
         std::fprintf(file_, "# Markers: <<START / <<STOP on a transport edge, <<PPQ-JUMP when the playhead\n");
         std::fprintf(file_, "# didn't continue from where the previous block should have left it (a locate).\n");
         std::fflush(file_);

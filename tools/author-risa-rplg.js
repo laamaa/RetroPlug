@@ -4,11 +4,11 @@
 // and tools/author-lsdj-rplg.js.
 //
 //   node tools/author-risa-rplg.js [ROM] [OUT.rplg.zip]
-//     ROM   default ../resources/roms/risa/risa-v2.3.0/risa-2.3.0-pal.nes
+//     ROM   default $RISA_SRC/build/risa-pal.nes, or ../risa/build/risa-pal.nes
 //     OUT   default build/risa.rplg.zip
 //
-// The ROM lives in the sibling resources tree (like the LSDj ones), so this exits 0 with a notice when
-// it isn't present - the render script skips rather than failing a resource-less checkout.
+// Build a current Risa ROM first. Missing fixtures skip the render on machines
+// without that checkout; an explicitly supplied unsupported ROM is rejected.
 const { buildSync } = require("esbuild");
 const { execFileSync } = require("child_process");
 const { resolve, dirname } = require("path");
@@ -18,7 +18,7 @@ const REPO = resolve(__dirname, "..");
 const PKG = resolve(REPO, "packages/retroplug");
 const HOST = process.env.RETROPLUG_HOST || resolve(REPO, "build/bin/retroplug-host");
 
-const ROM = resolve(REPO, process.argv[2] || "../resources/roms/risa/risa-v2.3.0/risa-2.3.0-pal.nes");
+const ROM = resolve(REPO, process.argv[2] || resolve(process.env.RISA_SRC || resolve(REPO, "../risa"), "build/risa-pal.nes"));
 const OUT = resolve(process.argv[3] || resolve(REPO, "build/risa.rplg.zip"));
 
 if (!existsSync(ROM)) {
