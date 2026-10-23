@@ -26,6 +26,27 @@ export interface RisaSymbols {
 }
 
 export const RISA_SYMBOLS: Record<string, RisaSymbols> = {
+  "2.5.1": {
+    seq_mode: 0x72,
+    seq_active: 0x73,
+    seq_current_bpm: 0x391,
+    song_queue_active: 0x3c3,
+    bss_song_row: 0x396,
+    bss_song_last_row: 0x39b,
+    bss_chain_idx: 0x3be,
+    bss_chain_row: 0x3a0,
+    bss_phrase_idx: 0x3a5,
+    bss_phrase_last_row: 0x3af,
+    zp_phrase_row: 0x7e,
+    bss_table_idx: 0x3cf,
+    bss_last_inst: 0x3de,
+    apu_current_note: 0x38c,
+    kit_active_idx: 0x343,
+    ui_current_screen: 0x68b,
+    ui_cursor_row: 0x683,
+    ui_cursor_col: 0x684,
+    ui_track: 0x685,
+  },
   "2.3.0": {
     seq_mode: 0x72,
     seq_active: 0x73,

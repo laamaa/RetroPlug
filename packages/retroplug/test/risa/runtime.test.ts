@@ -31,7 +31,16 @@ test("resolveRisaLayout rejects risa versions with no bundled layout", () => {
   // layout. These older builds moved the BSS/ZP variables, so decoding them with the 2.2.1 addresses is
   // garbage — resolve to null (graceful fallback) rather than alias them.
   for (const v of ["0.9.1", "1.0.0", "2.0.0", "2.1.0"]) expect(resolveRisaLayout(v)).toBe(null);
-  expect(supportedRisaVersions().sort()).toEqual(["2.2.0", "2.2.1", "2.3.0"]);
+  expect(supportedRisaVersions().sort()).toEqual(["2.2.0", "2.2.1", "2.3.0", "2.5.1"]);
+});
+
+test("2.5.1 resolves its own layout while unknown releases remain unsupported", () => {
+  const current = resolveRisaLayout("2.5.1");
+  expect(current != null).toBeTruthy();
+  expect(current!.version).toBe("2.5.1");
+  expect(current!.bpm !== resolveRisaLayout("2.3.0")!.bpm).toBeTruthy();
+  expect(current!.currentScreen !== resolveRisaLayout("2.3.0")!.currentScreen).toBeTruthy();
+  expect(resolveRisaLayout("2.5.2")).toBe(null);
 });
 
 test("2.3.0 resolves its OWN layout, not an alias to 2.2.1", () => {

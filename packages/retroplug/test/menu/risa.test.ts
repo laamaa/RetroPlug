@@ -102,6 +102,20 @@ test("the risa submenu appears only for a risa ROM and lists the catalog's songs
   expect(songs.filter((s) => s.kind === "submenu").map((s) => s.label)).toEqual(["[0] HOU8", "[1] HOU", "[2] DBZ", "[3] DBZ2-F", "[4] FUNK0"]);
 });
 
+test("risa 2.5.1 enables the tracker submenu and song management", () => {
+  const be = new MockBackend("/cfg");
+  const stores = composeAppStores({ backend: be });
+  const rom = risaRom();
+  setRisaVersionMarker(rom, "2.5.1");
+  be.seed("/roms/risa-2.5.1.nes", rom);
+  const id = stores.project.systems.addSystem("/roms/risa-2.5.1.nes")!;
+  be.setSram(id, CATALOG());
+  const sys = stores.project.systems.view().find((s) => s.id === id)!;
+  const items = buildInstanceMenu({ ...ctxOf(stores), system: sys }).items;
+  expect(findItem(items, "inst-risa")?.kind).toBe("submenu");
+  expect(findItem(submenuChildren(items, "inst-risa"), "risa-songs")?.kind).toBe("submenu");
+});
+
 test("an unsupported risa version greys the submenu out as a disabled '(Unsupported Version)' row", () => {
   const be = new MockBackend("/cfg");
   const stores = composeAppStores({ backend: be });

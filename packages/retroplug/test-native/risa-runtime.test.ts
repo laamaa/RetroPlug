@@ -15,16 +15,15 @@ import { runtime } from "../src/risa";
 declare const __DSP_KERNEL_BUNDLE__: string;
 
 declare const __RISA_SRC__: string;
-const RISA_ROM = __RISA_SRC__ + "/build/risa-pal.nes";
+const RISA_ROMS = ["pal", "ntsc"].map((region) => __RISA_SRC__ + `/build/risa-${region}.nes`);
 const DEMO_SRM = __RISA_SRC__ + "/website/play/demos/hevander.srm"; // carries a working song
 const BTN_SELECT = 6;
 const BTN_START = 7; // GB button order, reused for NES (NesButton::Start = 7). SELECT+START = play song.
 
-test("the risa runtime reader decodes live playback state from the real core", () => {
-  const be = createRealBackend();
-  if (!be.fileExists(RISA_ROM) || !be.fileExists(DEMO_SRM)) skip(`risa-runtime: missing ${RISA_ROM} or ${DEMO_SRM}`);
-
-  const layout = runtime.resolveRisaLayout("2.2.1");
+function verifyRuntime(be: ReturnType<typeof createRealBackend>, rom: string): void {
+  const version = runtime.identifyRisaVersion(be.readFile(rom)!);
+  const layout = runtime.resolveRisaLayout(version);
+  console.log(`[risa-runtime] ${rom}: version=${version}`);
   expect(layout != null).toBeTruthy();
 
   const project = new ProjectStore(be, new RecentStore(be), buildAppRegistry());
@@ -33,7 +32,7 @@ test("the risa runtime reader decodes live playback state from the real core", (
   expect(dsp.loadKernel(dsp.compileScript(__DSP_KERNEL_BUNDLE__)!)).toBeTruthy();
   project.setOnSystemsChange(() => syncDspFromStore(project, dsp));
 
-  const id = (project.systems.loadRom(RISA_ROM, { explicitSav: DEMO_SRM }) as { system: number }).system;
+  const id = (project.systems.loadRom(rom, { explicitSav: DEMO_SRM }) as { system: number }).system;
   audio.renderAudio(1500); // boot + settle
 
   // Before START: stopped. The reader sees a valid screen + resolved layout even when idle.
@@ -85,4 +84,13 @@ test("the risa runtime reader decodes live playback state from the real core", (
   }
   console.log(`[risa-runtime] phraseRows advanced from [${startRows.join(",")}]: moved=${moved}`);
   expect(moved).toBeTruthy();
+  be.removeSystem(id);
+}
+
+test("the risa runtime reader decodes live PAL and NTSC playback state from the real core", () => {
+  const be = createRealBackend();
+  for (const path of [...RISA_ROMS, DEMO_SRM]) {
+    if (!be.fileExists(path)) skip(`risa-runtime: missing ${path}`);
+  }
+  for (const rom of RISA_ROMS) verifyRuntime(be, rom);
 });

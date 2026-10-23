@@ -5,7 +5,7 @@
 // so one table serves both regions of a given risa version.
 //
 // Usage: RISA_SRC=/path/to/risa RISA_VERSION=2.3.0 node scripts/gen-risa-symbols.mjs
-// (defaults: RISA_SRC=/workspaces/risa-v2.2.1-source, RISA_VERSION from its src/app_version.h).
+// (defaults: RISA_SRC=/workspaces/risa-v2.2.1-source, RISA_VERSION from its app_version.h).
 // The run MERGES into the existing table: the named version is added or replaced, every other
 // version already in the file is kept verbatim. So a new risa release is one run, not a rewrite.
 //
@@ -38,10 +38,13 @@ function parseLbl(path) {
   return map;
 }
 
+const versionHeader = ["src/system/app_version.h", "src/app_version.h"]
+  .map((path) => `${RISA_SRC}/${path}`).find(existsSync);
 const version = process.env.RISA_VERSION
-  || (existsSync(`${RISA_SRC}/src/app_version.h`)
-    ? (readFileSync(`${RISA_SRC}/src/app_version.h`, "utf8").match(/"(\d+\.\d+\.\d+)"/)?.[1] ?? "unknown")
-    : "unknown");
+  || (versionHeader
+    ? readFileSync(versionHeader, "utf8").match(/"(\d+\.\d+\.\d+)"/)?.[1]
+    : null);
+if (!version) throw new Error("Set RISA_VERSION or provide risa's app_version.h");
 
 const pal = parseLbl(`${RISA_SRC}/build/risa-pal.lbl`);
 const ntscPath = `${RISA_SRC}/build/ntsc/risa-ntsc.lbl`;
