@@ -1,13 +1,43 @@
-// Pure grid layout math for the emulator grid, ported from the legacy shell (packages/ui/src/layout.ts +
-// SystemGrid.shapeFor). GB is 160×144 native; integer zoom (1..6) scales the tile linearly and LVGL's
-// nearest-neighbour upscales the framebuffer into it. `layout` matches ProjectSettings.layout
+// Pure grid layout math for the emulator grid. Integer zoom (1..6) scales native screen dimensions.
+// Mixed-console grids use cells large enough for every screen; each frame gets an integer fit inside.
+// `layout` matches ProjectSettings.layout
 // ("auto" / "row" / "column" / "grid"; see settingsEnums).
 
 import { SystemLayout, LAYOUT_VALUES } from "../../../src/settingsEnums";
+import type { Platform } from "../../../src/platform";
 export { SystemLayout, LAYOUT_VALUES };
 
 export const GB_NATIVE_W = 160;
 export const GB_NATIVE_H = 144;
+
+export interface ScreenSize { width: number; height: number }
+
+const NATIVE_SIZES: Record<Platform, ScreenSize> = {
+  gb: { width: GB_NATIVE_W, height: GB_NATIVE_H },
+  nes: { width: 256, height: 240 },
+  gba: { width: 240, height: 160 },
+  sms: { width: 256, height: 192 },
+  gg: { width: 160, height: 144 },
+};
+
+export function nativeScreenSize(platform: Platform): ScreenSize {
+  return NATIVE_SIZES[platform];
+}
+
+/** Uniform grid cells accommodate the widest and tallest loaded screens. Empty projects keep GB sizing. */
+export function gridNativeSize(systems: readonly { platform: Platform }[]): ScreenSize {
+  if (systems.length === 0) return NATIVE_SIZES.gb;
+  return {
+    width: Math.max(...systems.map((s) => nativeScreenSize(s.platform).width)),
+    height: Math.max(...systems.map((s) => nativeScreenSize(s.platform).height)),
+  };
+}
+
+/** Whole source pixels only: fractional nearest-neighbour scaling makes rows/columns uneven. */
+export function integerFrameSize(source: ScreenSize, area: ScreenSize): ScreenSize {
+  const scale = Math.max(1, Math.floor(Math.min(area.width / source.width, area.height / source.height)));
+  return { width: source.width * scale, height: source.height * scale };
+}
 
 export interface GridShape {
   cols: number;
@@ -25,12 +55,12 @@ export function resolveZoom(projectZoom: number, defaultZoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 }
 
-export function tileWidth(zoom: number): number {
-  return GB_NATIVE_W * zoom;
+export function tileWidth(zoom: number, nativeSize: ScreenSize = NATIVE_SIZES.gb): number {
+  return nativeSize.width * zoom;
 }
 
-export function tileHeight(zoom: number): number {
-  return GB_NATIVE_H * zoom;
+export function tileHeight(zoom: number, nativeSize: ScreenSize = NATIVE_SIZES.gb): number {
+  return nativeSize.height * zoom;
 }
 
 // 1=center, 2=row, 3–4=2×2, 5–9=3×3, 10–16=4×4; beyond that, square it. (legacy autoShape.)
@@ -60,9 +90,10 @@ export function gridContentSize(
   count: number,
   layout: SystemLayout,
   zoom: number,
+  nativeSize: ScreenSize = NATIVE_SIZES.gb,
 ): { width: number; height: number; shape: GridShape } {
   const shape = shapeFor(layout, Math.max(count, 1));
-  return { width: shape.cols * tileWidth(zoom), height: shape.rows * tileHeight(zoom), shape };
+  return { width: shape.cols * tileWidth(zoom, nativeSize), height: shape.rows * tileHeight(zoom, nativeSize), shape };
 }
 
 /** The grid-local rect of the tile at `index` (row/column derived from the shape). */
@@ -71,22 +102,23 @@ export function getTileBounds(
   count: number,
   layout: SystemLayout,
   zoom: number,
+  nativeSize: ScreenSize = NATIVE_SIZES.gb,
 ): { x: number; y: number; w: number; h: number } {
   const shape = shapeFor(layout, Math.max(count, 1));
   const col = index % shape.cols;
   const row = Math.floor(index / shape.cols);
-  const w = tileWidth(zoom);
-  const h = tileHeight(zoom);
+  const w = tileWidth(zoom, nativeSize);
+  const h = tileHeight(zoom, nativeSize);
   return { x: col * w, y: row * h, w, h };
 }
 
 /** The largest integer zoom in `[MIN_ZOOM, cap]` whose grid fits `area`, so the whole grid stays
  *  visible even when a tiling WM clamps the window below the size App asked for. The displayed zoom —
  *  SystemGrid renders at this, and `hitTestTile` maps drop coordinates through it. */
-export function fitZoom(count: number, layout: SystemLayout, cap: number, area: { width: number; height: number }): number {
+export function fitZoom(count: number, layout: SystemLayout, cap: number, area: ScreenSize, nativeSize: ScreenSize = NATIVE_SIZES.gb): number {
   const shape = shapeFor(layout, Math.max(count, 1));
   for (let z = Math.min(cap, MAX_ZOOM); z > MIN_ZOOM; z--) {
-    if (shape.cols * tileWidth(z) <= area.width && shape.rows * tileHeight(z) <= area.height) return z;
+    if (shape.cols * tileWidth(z, nativeSize) <= area.width && shape.rows * tileHeight(z, nativeSize) <= area.height) return z;
   }
   return MIN_ZOOM;
 }
@@ -100,8 +132,9 @@ export function displayZoom(
   projectZoom: number,
   defaultZoom: number,
   area: { width: number; height: number },
+  nativeSize: ScreenSize = NATIVE_SIZES.gb,
 ): number {
-  return fitZoom(count, layout, resolveZoom(projectZoom, defaultZoom), area);
+  return fitZoom(count, layout, resolveZoom(projectZoom, defaultZoom), area, nativeSize);
 }
 
 /** Map a window-pixel coordinate to the grid tile index under it, or `null` when it misses the grid
@@ -118,12 +151,13 @@ export function hitTestTile(
   projectZoom: number,
   defaultZoom: number,
   windowSize: { width: number; height: number },
+  nativeSize: ScreenSize = NATIVE_SIZES.gb,
 ): number | null {
   if (count <= 0) return null;
-  const zoom = displayZoom(count, layout, projectZoom, defaultZoom, windowSize);
+  const zoom = displayZoom(count, layout, projectZoom, defaultZoom, windowSize, nativeSize);
   const shape = shapeFor(layout, count);
-  const tw = tileWidth(zoom);
-  const th = tileHeight(zoom);
+  const tw = tileWidth(zoom, nativeSize);
+  const th = tileHeight(zoom, nativeSize);
   const gridW = shape.cols * tw;
   const gridH = shape.rows * th;
   // The grid is centered in the window (SystemGrid's outer Box) — offset the hit point into grid space.

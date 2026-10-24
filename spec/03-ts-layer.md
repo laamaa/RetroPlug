@@ -402,7 +402,10 @@ short-circuits on the project flag precisely because it runs on every menu rebui
   Click → `setFocus`; an unfocused tile gets a translucent dim overlay, a focused one an accent
   border (both suppressed when it is the only tile).
 - [`layout.ts`](../packages/retroplug/ui/screens/grid/layout.ts) is pure grid math
-  (`GB_NATIVE_W/H`, `shapeFor`, `gridContentSize`, `getTileBounds`).
+  (`nativeScreenSize`, `gridNativeSize`, `shapeFor`, `gridContentSize`, `getTileBounds`).
+  Zoom multiplies the console's native resolution (NES: 256×240), including the pre-map window size
+  and pointer hit testing. Mixed-console grids use uniform cells sized for the widest/tallest screen;
+  each frame is centered at the largest whole-number scale that fits its cell.
 
 **Why `StableSlot`.** `lv_binding_js`'s `insertChildBefore` ignores its `beforeChild`
 argument and always appends, so React reordering a child (or swapping its type) at a stable

@@ -1,4 +1,4 @@
-// One emulator tile: the running Game Boy screen for a system, blitted into an LVGL Canvas.
+// One emulator tile: the running console screen for a system, blitted into an LVGL Canvas.
 //
 // On every "frame" render tick it pulls the system's framebuffer (backend.getFrame — synchronous,
 // so no async drop-frame guard) and pushes it into the Canvas via setBuffer. Clicking the
@@ -18,10 +18,12 @@ import type { CanvasHandle } from "../../lvgl/lv";
 import { tagTestId } from "../../lvgl/StableSlot";
 import { LsdjOverlay } from "./LsdjOverlay";
 import { RisaOverlay } from "./RisaOverlay";
+import { integerFrameSize, type ScreenSize } from "./layout";
 import { getRenderJobs, cancelRender, dismissRenderJob, pickActiveRenderJob, renderBadgeLabel, type RenderJobStatus } from "../../host/render";
 
 export function EmulatorTile({
   systemId,
+  nativeSize,
   focused,
   single,
   width,
@@ -30,6 +32,7 @@ export function EmulatorTile({
   dimTestId,
 }: {
   systemId: number;
+  nativeSize: ScreenSize;
   focused: boolean;
   /** The only system in the project. A lone tile fills the window with no focus border and no dim — the
    *  focus cue only means something when there's another tile to distinguish it from. */
@@ -69,10 +72,11 @@ export function EmulatorTile({
   // border and no dim.
   const showBorder = focused && !single;
   const dim = !focused && !single;
+  const frameSize = integerFrameSize(nativeSize, { width, height });
 
   return (
     <Box onClick={onFocus} style={{ width, height, "background-color": "#000000" }}>
-      <PixelCanvas canvasRef={canvasRef} width={width} height={height} />
+      <PixelCanvas canvasRef={canvasRef} width={frameSize.width} height={frameSize.height} />
       {dim && (
         <Box
           innerRef={dimTestId ? tagTestId(dimTestId) : undefined}

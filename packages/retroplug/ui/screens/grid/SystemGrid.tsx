@@ -16,7 +16,7 @@ import { EmulatorTile } from "./EmulatorTile";
 import { Menu } from "../menu/Menu";
 import type { MenuTree } from "../menu/menuTree";
 import type { SystemView } from "../../../src/systemsStore";
-import { SystemLayout, shapeFor, tileWidth, tileHeight, displayZoom } from "./layout";
+import { SystemLayout, shapeFor, tileWidth, tileHeight, displayZoom, gridNativeSize, nativeScreenSize } from "./layout";
 
 export function SystemGrid({
   menuSystemId,
@@ -36,10 +36,11 @@ export function SystemGrid({
   if (systems.length === 0) return null; // App renders the start menu when empty
 
   const layout = settings.layout as SystemLayout;
-  const zoom = displayZoom(systems.length, layout, settings.zoom, userConfig.defaultZoom, display);
+  const nativeSize = gridNativeSize(systems);
+  const zoom = displayZoom(systems.length, layout, settings.zoom, userConfig.defaultZoom, display, nativeSize);
   const shape = shapeFor(layout, systems.length);
-  const tw = tileWidth(zoom);
-  const th = tileHeight(zoom);
+  const tw = tileWidth(zoom, nativeSize);
+  const th = tileHeight(zoom, nativeSize);
   const single = systems.length === 1;
 
   const rows: SystemView[][] = [];
@@ -61,6 +62,7 @@ export function SystemGrid({
                   ) : (
                     <EmulatorTile
                       systemId={sys.id}
+                      nativeSize={nativeScreenSize(sys.platform)}
                       focused={sys.focused}
                       single={single}
                       width={tw}

@@ -12,7 +12,7 @@ import { StoreProvider } from "./stores/StoreProvider";
 import { FocusProvider } from "./lvgl/FocusProvider";
 import { App } from "./App";
 import { native, pluginNamespace } from "./host/nativeHooks";
-import { gridContentSize, resolveZoom, SystemLayout } from "./screens/grid/layout";
+import { gridContentSize, gridNativeSize, resolveZoom, SystemLayout } from "./screens/grid/layout";
 
 function Root() {
   return (
@@ -39,11 +39,12 @@ function unmountUI() {
 function initialWindowSize(): { width: number; height: number } | null {
   const stores = pluginNamespace()?.stores;
   if (!stores) return null;
-  const count = stores.project.systems.view().length;
+  const systems = stores.project.systems.view();
+  const count = systems.length;
   if (count === 0) return null;
   const settings = stores.project.settings();
   const zoom = resolveZoom(settings.zoom, stores.userConfig.config().defaultZoom);
-  const { width, height } = gridContentSize(count, settings.layout as SystemLayout, zoom);
+  const { width, height } = gridContentSize(count, settings.layout as SystemLayout, zoom, gridNativeSize(systems));
   return { width, height };
 }
 

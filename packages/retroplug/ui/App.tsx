@@ -32,7 +32,7 @@ import { SystemGrid } from "./screens/grid/SystemGrid";
 import { LsdjHdScreen } from "./screens/hd/LsdjHdScreen";
 import { toggleLsdjDebug } from "./screens/grid/lsdjDebug";
 import { Menu } from "./screens/menu/Menu";
-import { gridContentSize, hitTestTile, resolveZoom, SystemLayout } from "./screens/grid/layout";
+import { gridContentSize, gridNativeSize, hitTestTile, resolveZoom, SystemLayout } from "./screens/grid/layout";
 import { buildInstanceMenu, buildStartMenu, composeWindowTitle, trackerCartLabel, type MenuContext } from "./screens/menu/menuDefs";
 import { subscribeAudioDraft } from "./screens/menu/audioDraft";
 import { subscribeMidi } from "./screens/menu/midiDevices";
@@ -102,6 +102,7 @@ export function App() {
   const keyToAction = useMemo(() => buildKeyToAction(bindings.keyboardActions), [bindings.keyboardActions]);
   const padToAction = useMemo(() => buildGamepadToAction(bindings.gamepadActions), [bindings.gamepadActions]);
   const resolvedZoom = resolveZoom(settings.zoom, userConfig.defaultZoom);
+  const nativeSize = gridNativeSize(systems);
 
   // The standalone OS window title: version + the focused tracker cart's "<song> - <ROM name>" when one is
   // loaded (LSDj / risa), else the project's display name (its own name, else the one derived from the
@@ -137,9 +138,9 @@ export function App() {
   // pre-map by the editor (PluginUI::applyInitialWindowSize) so the window opens correct.
   useEffect(() => {
     if (empty || isWindowSizeControlled()) return;
-    const { width, height } = gridContentSize(systems.length, settings.layout as SystemLayout, resolvedZoom);
+    const { width, height } = gridContentSize(systems.length, settings.layout as SystemLayout, resolvedZoom, nativeSize);
     requestWindowSize(width, height);
-  }, [empty, systems.length, settings.layout, resolvedZoom]);
+  }, [empty, systems.length, settings.layout, resolvedZoom, nativeSize.width, nativeSize.height]);
 
   // Keep the OS window title in sync with the project name / version.
   useEffect(() => setWindowTitle(windowTitle), [windowTitle]);
@@ -192,7 +193,7 @@ export function App() {
   useNativeEvent("mouse", (button, press, x, y) => {
     if (button !== MOUSE_BUTTON_RIGHT || !press) return;
     if (empty || isMenuModalActive() || overlay) return;
-    const idx = hitTestTile(x, y, systems.length, settings.layout as SystemLayout, settings.zoom, userConfig.defaultZoom, windowSize);
+    const idx = hitTestTile(x, y, systems.length, settings.layout as SystemLayout, settings.zoom, userConfig.defaultZoom, windowSize, nativeSize);
     if (idx == null) return; // must land on an instance
     const targetId = systems[idx].id;
     stores.project.systems.setFocus(targetId); // focus the right-clicked instance, then anchor its menu
@@ -216,7 +217,7 @@ export function App() {
   useNativeEvent("file-drop", (joined, x, y) => {
     const paths = String(joined ?? "").split("\n").filter((p) => p.length > 0);
     if (paths.length === 0) return;
-    const idx = hitTestTile(x, y, systems.length, settings.layout as SystemLayout, settings.zoom, userConfig.defaultZoom, windowSize);
+    const idx = hitTestTile(x, y, systems.length, settings.layout as SystemLayout, settings.zoom, userConfig.defaultZoom, windowSize, nativeSize);
     const targetId = idx != null ? systems[idx].id : stores.project.systems.focused();
     const target = systems.find((s) => s.id === targetId);
     const action = resolveDropAction(
