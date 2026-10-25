@@ -1,8 +1,8 @@
 set(_DPF_PATCH_DIR "${DPFJS_PATH}/deps/dpf")
-# Keep separate patches so an existing PPQ-patched checkout can add the
-# VST3 latency fix without trying to apply the old hunks again.
-foreach(_DPF_PATCH_NAME IN ITEMS dpf-absolute-ppq dpf-latency-notify)
+# Keep patches independent so already-patched checkouts can pick up new fixes.
+foreach(_DPF_PATCH_NAME IN ITEMS dpf-absolute-ppq dpf-latency-notify dpf-macos-buffer-default)
     set(_DPF_PATCH "${CMAKE_SOURCE_DIR}/cmake/patches/${_DPF_PATCH_NAME}.patch")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_DPF_PATCH}")
     execute_process(COMMAND git apply --reverse --check "${_DPF_PATCH}"
         WORKING_DIRECTORY "${_DPF_PATCH_DIR}" RESULT_VARIABLE _DPF_PATCH_PRESENT
         OUTPUT_QUIET ERROR_QUIET)

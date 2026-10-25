@@ -1,0 +1,14 @@
+--- a/distrho/src/jackbridge/RtAudioBridge.hpp
++++ b/distrho/src/jackbridge/RtAudioBridge.hpp
+@@ -70,6 +70,11 @@
+     // caching
+     String name;
++   #ifdef DISTRHO_OS_MAC
++    // Keep the audio-driven emulator responsive to keyboard input (2.7 ms at 48 kHz).
++    uint nextBufferSize = 128;
++   #else
+     uint nextBufferSize = 512;
++   #endif
+ 
+     RtAudioBridge()
+     {
