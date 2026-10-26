@@ -63,7 +63,16 @@ const DETECT_OFF_CHUNKS = 2; // NR52 must read off this many consecutive chunks 
 // Per-mode stream labels, matching each system's channelLayout() order.
 const GB_CHANNELS = ["pulse1", "pulse2", "wave", "noise"]; // SameBoySystem::channelLayout (stereo streams)
 const NES_PINS = ["pulse", "tnd", "expansion"]; // MesenNesSystem StereoModPins (--split pins; mono streams)
-const NES_CHANNELS = ["square1", "square2", "triangle", "noise", "dmc"]; // MesenNesSystem IndividualMono (--split channels; mono)
+const NES_CHANNELS = ["square1", "square2", "triangle", "noise", "dmc"];
+// Fixed mapper layouts, matching NesSoundMixer::ExpansionChannelNames. N163 starts at hardware slot 7.
+const NES_EXPANSION_CHANNELS: Record<string, string[]> = {
+  vrc6: ["vrc6_pulse1", "vrc6_pulse2", "vrc6_saw"],
+  mmc5: ["mmc5_pulse1", "mmc5_pulse2", "mmc5_pcm"],
+  vrc7: Array.from({ length: 6 }, (_, i) => `vrc7_fm${i + 1}`),
+  n163: Array.from({ length: 8 }, (_, i) => `n163_wave${i + 1}`),
+  s5b: ["s5b_tone1", "s5b_tone2", "s5b_tone3"],
+  fds: ["fds_wave"],
+};
 
 export function platformOf(rom: string): Platform {
   switch (extensionLower(rom)) {
@@ -77,7 +86,7 @@ export function platformOf(rom: string): Platform {
   }
 }
 
-/** NES channelExportMode for a split mode: channels → the 5 individual mono core channels,
+/** NES channelExportMode for a split mode: channels → base and expansion mono voices,
  *  pins → the 3 analog output pins. Only meaningful for NES + a non-mix split. */
 function nesExportMode(split: SplitMode): ChannelExportMode {
   return split === "channels" ? "individualMono" : "stereoModPins";
@@ -456,19 +465,18 @@ export function outBase(o: RenderOpts, songName: string | null): string {
 /** The WAV file paths a render will write for `prefix` (a base WITHOUT the extension), mirroring buildSink's
  *  naming: mix → one `<prefix>.wav`; split → one `<prefix>_<channel>.wav` per stream. Used by the "rename"
  *  policy to detect a collision on any of the mode's outputs. */
-function renderOutputPaths(o: RenderOpts, platform: Platform, prefix: string): string[] {
+function renderOutputPaths(o: RenderOpts, names: string[], prefix: string): string[] {
   if (o.split === "mix") return [`${prefix}.wav`];
-  const names = platform === "gb" ? GB_CHANNELS : o.split === "channels" ? NES_CHANNELS : NES_PINS;
   return names.map((n) => `${prefix}_${n}.wav`);
 }
 
 /** Apply the "If Exists" policy to a resolved base. "overwrite" (default) clobbers; "rename" bumps to the
  *  first `<name>_N` whose outputs don't yet exist (checking every file the mode would write). */
-function resolveOnExists(ctx: RenderContext, o: RenderOpts, platform: Platform, base: string): string {
+function resolveOnExists(ctx: RenderContext, o: RenderOpts, names: string[], base: string): string {
   if (o.onExists !== "rename") return base;
   const isMix = o.split === "mix";
   const prefix = isMix && base.toLowerCase().endsWith(".wav") ? base.slice(0, -4) : base;
-  const unique = uniqueBase(prefix, (p) => renderOutputPaths(o, platform, p).some((f) => ctx.backend.fileExists(f)));
+  const unique = uniqueBase(prefix, (p) => renderOutputPaths(o, names, p).some((f) => ctx.backend.fileExists(f)));
   return isMix ? `${unique}.wav` : unique;
 }
 
@@ -498,10 +506,10 @@ function leftLane(b: Float32Array, frames: number): Float32Array {
 /** Build the sink for the requested output shape. Writers open on the first chunk once the stream count is
  *  known (from chunk.length) — opening truncates, so a re-render clobbers any stale file.
  *    mix       → 1 WAV: GB/GBA stereo, NES mono (its lanes are identical, so the left lane is lossless)
- *    channels  → GB 4 stereo stems; NES 5 mono core channels
+ *    channels  → GB 4 stereo stems; NES base + expansion mono voices
  *    pins      → NES 3 mono analog pins
  *  (No combined multi-channel WAV — split modes write per-stream files only.) */
-function buildSink(ctx: RenderContext, o: RenderOpts, id: number, platform: Platform, sr: number, base: string, log: Logger): RenderSink {
+function buildSink(ctx: RenderContext, o: RenderOpts, id: number, platform: Platform, sr: number, base: string, names: string[], log: Logger): RenderSink {
   const renderChunk = o.split === "mix"
     ? (ms: number) => [ctx.audio.renderAudio(ms)]
     : (ms: number) => ctx.audio.renderAudioPerChannel(id, ms);
@@ -525,7 +533,6 @@ function buildSink(ctx: RenderContext, o: RenderOpts, id: number, platform: Plat
       writers = Array.from({ length: streamCount }, (_, i) => open(`${base}_${GB_CHANNELS[i] ?? `ch${i}`}.wav`, 2));
       summary = `GB ${streamCount}-channel render (@${sr}Hz) → ${base}_*`;
     } else {
-      const names = o.split === "channels" ? NES_CHANNELS : NES_PINS;
       writers = Array.from({ length: streamCount }, (_, i) => open(`${base}_${names[i] ?? `ch${i}`}.wav`, 1));
       summary = `NES ${o.split} (${streamCount} mono streams @${sr}Hz) → ${base}_*`;
     }
@@ -752,7 +759,10 @@ export function runRenderJob(ctx: RenderContext, o: RenderOpts, hooks: RenderHoo
   // Default the filename to the SONG: the selected song when --song/--song-index is used, else the sav's
   // working song. --out overrides both, so skip the sav read then.
   const songName = o.out ? null : seed ? seed.name : smsSong ? smsSong.name : currentSongName(ctx, o, platform);
-  const base = resolveOnExists(ctx, o, platform, outBase(o, songName));
+  const chip = platform === "nes" && o.split === "channels" ? ctx.backend.getExpansionAudioState(id)?.chip : undefined;
+  const names = platform === "gb" ? GB_CHANNELS : o.split === "pins" ? NES_PINS
+    : [...NES_CHANNELS, ...(NES_EXPANSION_CHANNELS[chip ?? "none"] ?? [])];
+  const base = resolveOnExists(ctx, o, names, outBase(o, songName));
 
   // Song-length auto-detect: when the ROM is a supported tracker (LSDj on GB, risa on NES) and the user
   // didn't pin a duration, render to the HFF stop instead of a fixed window, report the length, and trim
@@ -778,7 +788,7 @@ export function runRenderJob(ctx: RenderContext, o: RenderOpts, hooks: RenderHoo
   log(`rendering ${o.rom} → ${base}${o.split === "mix" ? "" : "_*"} (${how})…`);
 
   // Stream PCM straight to the WAV files as it renders (bounded memory) rather than buffering the whole song.
-  const sink = buildSink(ctx, o, id, platform, sr, base, log);
+  const sink = buildSink(ctx, o, id, platform, sr, base, names, log);
 
   // Auto-start playback, capturing the song's opening frames as the recording's head (see pressPlay). The
   // sink exists first so the button-hold render is captured in the right mix/split shape, not discarded.

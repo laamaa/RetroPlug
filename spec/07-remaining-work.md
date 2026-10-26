@@ -24,15 +24,12 @@ the per-block **`keys` feed** that the live `Engine` path doesn't marshal yet �
 so the kernel's `buttons`/`keys` ABI is present but unfed. Feeding host keys/buttons per block unblocks
 this mode. (See [04-roles-dsp-kernel.md](04-roles-dsp-kernel.md).)
 
-### NES per-mapper expansion sub-channels (multichannel audio)
+### EPSM and simultaneous NSF expansion chips
 
-Per-console channel output ships end-to-end ([10-multichannel-audio-out.md](10-multichannel-audio-out.md),
-steps 1–6): Game Boy 4-stem output, NES stereo-mod pins, and NES 5 individual core channels. The one
-open piece is the **individual expansion voices** (VRC6 pulse/saw, VRC7 6×FM, N163, MMC5, FDS, S5B),
-which live inside each mapper's audio class before they sum into the chip's `AudioChannel` delta, so
-they need a per-mapper audio tap deeper than the `NesSoundMixer` edit, and VRC7's emu2413 core is the
-one large tap. (Test material is no longer the obstacle: `resources/roms/bliptoaster-{vrc6,vrc7,n163,
-mmc5,s5b}.nes` are all committed, and `reaper:params-vrc7` already drives one of them.)
+The 16-output plugin now includes individual VRC6, VRC7, N163, MMC5, 5B and FDS voices in Channels
+([10-multichannel-audio-out.md](10-multichannel-audio-out.md)). EPSM uses a separate audio-provider path,
+and NSF files can combine several chips; their allocation and capture remain outside this single-chip
+layout. Dynamic DAW port labels and stereo pairs for every NES voice are deferred.
 
 ### Standalone disk-wins reopen
 

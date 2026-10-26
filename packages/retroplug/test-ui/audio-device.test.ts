@@ -62,3 +62,17 @@ test("Settings > Audio > Output Device: cycles the driver's devices, stages, and
   expect(calls.at(-1)).toEqual([48000, 1024, 2, "Auto", "HDMI"]);
   expect(labelOf("Output Device")).toBe("Output Device: HDMI");
 });
+
+test("Settings > Audio offers 16 output channels and applies the full width", () => {
+  for (let i = 0; i < 20; i++) { ui.tapKey(Key.Up); ui.pump(2); }
+  expect(navTo("Out Channels")).toBeTruthy();
+  for (let i = 0; i < 7 && !labelOf("Out Channels").includes("16 ("); i++) {
+    ui.tapKey(Key.Enter);
+    ui.pump(8);
+  }
+  expect(labelOf("Out Channels")).toBe("Out Channels: 16 (8 pairs)");
+  expect(navTo("Apply")).toBeTruthy();
+  ui.tapKey(Key.Enter);
+  ui.pump(8);
+  expect(calls.at(-1)![2]).toBe(16);
+});

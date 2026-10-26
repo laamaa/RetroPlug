@@ -119,6 +119,12 @@ protected:
 
 		//"The sound output of the square channels are equivalent in volume to the corresponding APU channels"
 		//"The polarity of all MMC5 channels is reversed compared to the APU."
+		auto apu = _console->GetApu();
+		if(apu->IsExpansionCaptureEnabled()) {
+			apu->CaptureExpansionOutput(AudioChannel::MMC5, 0, -_square1.GetOutput());
+			apu->CaptureExpansionOutput(AudioChannel::MMC5, 1, -_square2.GetOutput());
+			apu->CaptureExpansionOutput(AudioChannel::MMC5, 2, -_pcmOutput);
+		}
 		int16_t summedOutput = -(_square1.GetOutput() + _square2.GetOutput() + _pcmOutput);
 		if(summedOutput != _lastOutput) {
 			_console->GetApu()->AddExpansionAudioDelta(AudioChannel::MMC5, summedOutput - _lastOutput);

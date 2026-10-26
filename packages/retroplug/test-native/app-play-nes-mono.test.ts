@@ -68,7 +68,7 @@ test("NES renders its 5 core channels individually (renderAudioPerChannel mode 3
 
   // Idle: five core streams, each near-silent.
   const idle = audio.renderAudioPerChannel(id, 500);
-  expect(idle.length).toBe(5); // Square1, Square2, Triangle, Noise, DMC
+  expect(idle.length).toBe(8); // five base voices + three idle S5B voices on this mapper
   const frames = idle[0].length;
   expect(frames > 0).toBeTruthy();
   idle.forEach((ch) => expect(ch.length).toBe(frames));

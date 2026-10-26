@@ -108,6 +108,15 @@ private:
 			summedOutput += _channelOutput[i];
 		}
 		summedOutput /= GetNumberOfChannels() + 1;
+		// Voice 1 is the highest hardware slot, also the first voice enabled by the chip.
+		// Keep all eight outputs present; the active count changes gain, never bus identities.
+		if(_console->GetApu()->IsExpansionCaptureEnabled()) {
+			for(int i = 0; i < 8; i++) {
+				double output = i <= GetNumberOfChannels()
+					? (double)_channelOutput[7 - i] / (GetNumberOfChannels() + 1) : 0;
+				_console->GetApu()->CaptureExpansionOutput(AudioChannel::Namco163, (uint32_t)i, output);
+			}
+		}
 
 		_console->GetApu()->AddExpansionAudioDelta(AudioChannel::Namco163, summedOutput - _lastOutput);
 		_lastOutput = summedOutput;

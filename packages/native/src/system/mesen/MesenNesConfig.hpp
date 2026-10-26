@@ -36,11 +36,11 @@ struct MesenNesConfig {
     // hardware mixes it. Live knob. The N8 Pro's FPGA has the same control (`master_vol`, 128 = unity), and
     // the UI drives both from this one value, so a cart sounds the same emulated and on the console.
     std::uint32_t expansionVolume   = 100;
-    // Per-channel audio export mode (CLI-only; spec/10 §5/§5b). 0 = Mix (default, the mixed stereo
+    // Per-channel audio export mode ( spec/10 §5/§5b). 0 = Mix (default, the mixed stereo
     // output). 1 = StereoModPins: the two 2A03 output pins (Pulse | TND) + a lumped Expansion stream, 3
     // mono channelLayout() streams. 3 = IndividualMono: the 5 core channels (Square1/Square2/Triangle/
-    // Noise/DMC) as raw mono stems ("does not sum"). (2 = pins + a mix reference, native/test-only.) Set
-    // at construct via the "mesen" role blob (capture engages in onActivate); there is no live toggle.
+    // Noise/DMC) plus mapper voices as raw mono stems ("does not sum"). (2 = pins + a mix reference, native/test-only.) Set
+    // at construct via the "mesen" role blob (capture engages in onActivate); the Engine also arms it live for split routing.
     std::uint32_t channelExportMode = 0;
     // APU flush window expressed as a latency in milliseconds — the worst-case NES audio latency the
     // resampler batching adds (window duration = cycleLength / cpuClock). Live-editable ("mesen" role knob);

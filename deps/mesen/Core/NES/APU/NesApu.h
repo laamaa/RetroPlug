@@ -23,6 +23,7 @@ class NesApu : public ISerializable, public INesMemoryHandler
 
 private:
 	bool _apuEnabled;
+	bool _captureExpansion = false; // derived host routing state; never serialized
 	bool _needToRun;
 
 	uint32_t _previousCycle;
@@ -69,6 +70,9 @@ public:
 	void EndFrame();
 
 	void AddExpansionAudioDelta(AudioChannel channel, int16_t delta);
+	bool IsExpansionCaptureEnabled() const { return _captureExpansion; }
+	void SetExpansionCaptureEnabled(bool enabled) { _captureExpansion = enabled; }
+	void CaptureExpansionOutput(AudioChannel chip, uint32_t voice, double output);
 	void SetApuStatus(bool enabled);
 	bool IsApuEnabled();
 	static ConsoleRegion GetApuRegion(NesConsole* console);

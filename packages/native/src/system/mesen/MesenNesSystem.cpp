@@ -243,8 +243,8 @@ void MesenNesSystem::onActivate(double sampleRate) {
 
         // Per-channel export (spec/10 §5/§5b): arm the sound mixer's tap so channelLayout() exposes the
         // per-mode streams to renderAudioPerChannel — mode 1 = 3 pins, mode 2 = pins + mix-reference
-        // (native/test-only), mode 3 = the 5 individual core channels. (CLI-only; a normal Mix build never
-        // touches this and stays byte-identical.)
+        // (native/test-only), mode 3 = the five base channels plus mapper voices. A normal Mix build
+        // leaves capture off; the Engine can arm it live for split routing.
         if (config_.channelExportMode >= 1) {
             nesMixer_->SetChannelCapture(config_.channelExportMode, static_cast<std::uint32_t>(sampleRate));
             channelCapture_ = true;
@@ -541,7 +541,7 @@ void MesenNesSystem::finishBlock(const AudioBlockInfo& info, float* const* outs,
             if (const std::uint32_t avail = nesMixer_->AvailableCaptureFrames(); avail > 0) {
                 auto& discard = chanAccum_[0]; // reuse a per-stream scratch; the mix path doesn't fan it out
                 if (discard.size() < avail) discard.assign(avail, 0.0f);
-                const std::size_t nStreams = channelLayout().size();
+                const std::size_t nStreams = nesMixer_->CaptureStreamCount();
                 for (std::size_t k = 0; k < nStreams; ++k)
                     nesMixer_->DrainChannel(static_cast<std::uint32_t>(k), discard.data(), avail);
             }
@@ -557,9 +557,11 @@ void MesenNesSystem::finishBlock(const AudioBlockInfo& info, float* const* outs,
 
 std::vector<ChannelStream> MesenNesSystem::channelLayout() const {
     if (channelCapture_) {
-        // Mode 3 (§5b): the 5 individual core channels as raw mono stems ("does not sum").
+        // Mode 3: the five base voices followed by the fixed mapper voice layout ("does not sum").
         if (config_.channelExportMode == 3) {
-            return {{"Square1", false}, {"Square2", false}, {"Triangle", false}, {"Noise", false}, {"DMC", false}};
+            std::vector<ChannelStream> layout = {{"Square1", false}, {"Square2", false}, {"Triangle", false}, {"Noise", false}, {"DMC", false}};
+            for (const auto& name : nesMixer_->ExpansionChannelNames()) layout.push_back({name, false});
+            return layout;
         }
         // The two 2A03 stereo-mod output pins + the lumped expansion term, as mono streams (spec/10 §5).
         // Mode 2 (native/test-only) appends the mix-reference stream for the fidelity test.

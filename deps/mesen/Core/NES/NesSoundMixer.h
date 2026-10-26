@@ -71,12 +71,15 @@ private:
 	//   2 Pins+Reference: the above + [3] the full mix scalar through the SAME path — fidelity-test only,
 	//                    making Σ(pins) == reference exact within one instance (no cross-resampler drift).
 	//   3 IndividualMono: the 5 core channels [0] Square1 [1] Square2 [2] Triangle [3] Noise [4] DMC as
-	//                    raw pre-DAC linear levels (per-channel scaled) — for isolation; these DON'T sum.
+	//                    raw pre-DAC linear levels, followed by individual expansion voices; base stems DON'T sum.
 	// The tap only READS _currentOutput; the mixed _blipBuf*/_previousOutput*/_channelOutput/_timestamps
 	// are never touched.
-	static constexpr uint32_t MaxCaptureStreams = 5;  // 3 pins (+ ref), or 5 core mono channels
+	static constexpr uint32_t MaxCaptureStreams = 13; // five base + up to eight N163 voices
+	vector<string> _expansionNames;
+	AudioChannel _captureChip = AudioChannel::FDS;
+	double _expansionScale = 0;
 	uint32_t _captureMode = 0;                        // 0 = off, else the active channelExportMode
-	uint32_t _captureStreams = 0;                     // stream count for _captureMode (0/3/4/5)
+	uint32_t _captureStreams = 0;                     // stream count for _captureMode (0/3/4/5..13)
 	uint32_t _captureHostRate = 0;
 	blip_t* _streamBlip[MaxCaptureStreams] = {};
 	int16_t _streamPrev[MaxCaptureStreams] = {};
@@ -117,11 +120,15 @@ public:
 	void AddDelta(AudioChannel channel, uint32_t time, int16_t delta);
 
 	// RetroPlug per-channel capture (spec/10 §5/§5b). `mode` is the channelExportMode: 0 = off, 1 = pins,
-	// 2 = pins + reference (fidelity test), 3 = 5 individual core mono channels. `hostRate` is passed in
+	// 2 = pins + reference (fidelity test), 3 = 5 base mono channels plus mapper voices. `hostRate` is passed in
 	// (the caller's sample rate) so the mixer needn't reach into settings. AvailableCaptureFrames reports
 	// host frames ready (all captured streams stay equal length); DrainChannel pops `frameCount` mono float
 	// samples from stream k (int16→float ÷32768, erase-from-front), like MesenAudioDevice::drain.
 	void SetChannelCapture(uint32_t mode, uint32_t hostRate);
+	uint32_t CaptureStreamCount() const { return _captureStreams; }
+	const vector<string>& ExpansionChannelNames() const { return _expansionNames; }
+	// Absolute, signed chip-domain level at the APU clock; capture state is derived, never serialized.
+	void CaptureExpansionOutput(AudioChannel chip, uint32_t voice, uint32_t time, double output);
 	uint32_t AvailableCaptureFrames() const;
 	uint32_t DrainChannel(uint32_t stream, float* dest, uint32_t frameCount);
 

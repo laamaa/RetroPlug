@@ -63,6 +63,17 @@ FdsAudio::FdsAudio(NesConsole* console) : BaseExpansionAudio(console)
 {
 }
 
+NesExpansionAudioState FdsAudio::GetState()
+{
+	NesExpansionAudioChannel channel;
+	channel.Enabled = !_haltWaveform && !_waveWriteEnabled;
+	channel.Volume = (uint8_t)(std::min((int)_volume.GetGain(), 32) * 15 / 32);
+	channel.OutputLevel = _lastOutput;
+	channel.Period = _volume.GetFrequency();
+	channel.Frequency = channel.Period * (double)_console->GetMasterClockRate() / (65536.0 * 64.0);
+	return {"fds", {channel}};
+}
+
 uint8_t FdsAudio::ReadRegister(uint16_t addr)
 {
 	uint8_t value = _console->GetMemoryManager()->GetOpenBus();

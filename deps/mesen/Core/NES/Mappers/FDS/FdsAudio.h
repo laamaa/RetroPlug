@@ -5,6 +5,7 @@
 #include "NES/Mappers/FDS/ModChannel.h"
 #include "NES/Mappers/FDS/BaseFdsChannel.h"
 #include "NES/APU/BaseExpansionAudio.h"
+#include "NES/NesExpansionAudioState.h"
 
 class NesConsole;
 struct MapperStateEntry;
@@ -46,4 +47,5 @@ public:
 	void WriteRegister(uint16_t addr, uint8_t value);
 	
 	void GetMapperStateEntries(vector<MapperStateEntry>& entries);
+	NesExpansionAudioState GetState();
 };

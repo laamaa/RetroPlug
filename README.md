@@ -107,8 +107,10 @@ option offers:
   instance 2 → 3-4, …).
 - **1 Ch / Inst** - each instance on its own mono channel.
 - **Channels** - one system's individual sound channels: a Game Boy's 4 channels as
-  four stereo pairs across the 8 outs, or a NES's 5 core channels (square 1/2,
-  triangle, noise, DMC) as mono on outs 1-5.
+  four stereo pairs on outs 1–8, or a NES's five base channels (square 1/2,
+  triangle, noise, DMC) as mono on outs 1–5, followed by individual expansion voices on outs 6 onward.
+  The plugin exposes 16 outputs: VRC6/MMC5/5B use 8, VRC7 uses 11, N163 uses 13, and FDS uses 6.
+  N163 keeps all eight wave outputs present when its active voice count changes.
 - **Pins** - a NES's three 2A03 output pins (Pulse, TND, Expansion) as mono on outs
   1-3.
 - **Stereo Pins** - the same three pins, but a stereo *pair* each (outs 1/2, 3/4, 5/6)
@@ -298,7 +300,7 @@ raw boot audio); mGB needs no such press, as it plays from incoming MIDI. A sibl
   fixed length with `--duration 3s` (`ms` / `s` / `m`). smsggdj songs have no end to
   detect, so `--duration` is required for those.
 - **Per-channel stems** - `--split channels` writes one WAV per sound channel (Game
-  Boy: 4 stereo stems; NES: 5 mono core channels), and `--split pins` writes the NES
+  Boy: 4 stereo stems; NES: 5 mono base channels plus individual expansion voices), and `--split pins` writes the NES
   analog output pins. The default `--split mix` writes a single mixed file.
 - **Song selection** - `--list-songs` prints the songs saved in a cart's `.sav`, and
   `--song NAME` / `--song-index N` render a chosen one. Works for LSDj, risa and

@@ -135,7 +135,7 @@ public:
 
     // --- per block: run kernel → fan sinks to cores → route to the outputs → advance the ppq clock ---
     // Multi-out core: `outputs` is a flat array of `numOutputs` planar channels; each system routes
-    // into its pair per audioRouting_ (via MultiOutRouter). The plugin passes its 8 channels; the
+    // into its pair per audioRouting_ (via MultiOutRouter). The plugin passes its 16 channels; the
     // stereo overload below passes 2 (any routing mode collapses to one pair with 2 channels).
     void processBlock(std::uint32_t frames, float* const* outputs, std::size_t numOutputs);
     void processBlock(std::uint32_t frames, float* outL, float* outR);

@@ -8,7 +8,7 @@
 #define DISTRHO_PLUGIN_CLAP_ID     "net.tommitytom.retroplug"
 
 #define DISTRHO_PLUGIN_NUM_INPUTS  0
-#define DISTRHO_PLUGIN_NUM_OUTPUTS 8   // four stereo pairs (out_1..4); each system routes to one per audioRouting
+#define DISTRHO_PLUGIN_NUM_OUTPUTS 16  // eight stereo pairs; NES Channels packs up to 13 mono voices
 
 #define DISTRHO_PLUGIN_IS_RT_SAFE  1
 #define DISTRHO_PLUGIN_IS_SYNTH    1

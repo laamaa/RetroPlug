@@ -116,6 +116,7 @@ protected:
 
 public:
 	~Fds();
+	NesExpansionAudioState GetExpansionAudioState() override;
 
 	void SaveBattery() override;
 

@@ -44,8 +44,8 @@ public:
     bool stepIfBelowTarget(std::uint32_t framesNeeded) override;
     void finishBlock(const AudioBlockInfo& info, float* const* outs, std::size_t laneCount) override;
 
-    // Default = one stereo "Mix" stream. Under channelExportMode == StereoModPins (CLI-only), reports
-    // the three mono pin streams (Pulse | TND | Expansion) the NesSoundMixer tap captures (spec/10 §5).
+    // Default = one stereo Mix stream. Capture exposes mono pins or base + mapper voices;
+    // the Engine also arms capture live for split routing (spec/10).
     std::vector<ChannelStream> channelLayout() const override;
 
     // Audio-thread: forward host MIDI events to the attached N8 role (if any).
@@ -160,7 +160,7 @@ private:
     // onDeactivate) — used by the live APU-latency knob (all NES systems) AND per-channel capture (spec/10
     // §5 pins / §5b individual mono). chanAccum_ holds the per-stream mono drain each block: 3 pins (mode 1),
     // 4 with the mix-reference (mode 2), or 5 core channels (mode 3).
-    static constexpr std::size_t      kMaxChannelStreams = 5;
+    static constexpr std::size_t      kMaxChannelStreams = 13;
     NesSoundMixer*                    nesMixer_ = nullptr;
     bool                              channelCapture_ = false;
     std::array<std::vector<float>, kMaxChannelStreams> chanAccum_;

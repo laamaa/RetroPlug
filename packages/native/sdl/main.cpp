@@ -299,7 +299,7 @@ struct AppState {
     int    reqSampleRate = 48000;  // requested (UI-configurable) rate + block + channels, persisted to audio.json
     int    reqBlockSize  = 512;    // low-latency default; low-power devices (the handheld) pass a bigger buffer
                                    // via --block-size (e.g. 4096) so the audio callback keeps its deadline
-    int    reqOutChannels = 2;     // 2 = stereo mix (default); 4/6/8 = wide stems for a multichannel device
+    int    reqOutChannels = 2;     // 2 = stereo mix (default); 4..16 = wide stems for a multichannel device
     int    reqHostApi = -1;        // chosen PortAudio host API (PaHostApiTypeId: paPipeWire/paALSA/paJACK/...);
                                    // -1 = Auto (prefer PipeWire, else default). Persisted to audio.json.
     std::string reqOutputDevice;   // chosen output device NAME within reqHostApi's host API ("" = the host API
@@ -591,7 +591,7 @@ JSValue jsGetAudioConfig(JSContext* ctx, JSValueConst, int, JSValueConst*) {
 
 // __rp_setAudioConfig(sampleRate, blockSize, outChannels?, driver?, device?): re-open the audio device with new
 // params on the fly (and persist them). Reuses the deactivate→re-rate→reactivate handoff the plugin does for a
-// host SR change. outChannels is optional (older UI bundles omit it) — 2/4/6/8; anything else keeps the current
+// host SR change. outChannels is optional (older UI bundles omit it) — even counts 2..16; anything else keeps the current
 // count. driver is optional — "Auto"/"" = the default (PipeWire-preferred) selection, else a host API name from
 // __rp_getAudioConfig().drivers (matched to its PaHostApiTypeId); an unknown name keeps the current driver.
 // device is optional — "" = the host API default, else an output device name from
@@ -601,7 +601,7 @@ JSValue jsSetAudioConfig(JSContext* ctx, JSValueConst, int argc, JSValueConst* a
         int sr = 0, bs = 0, ch = g_app->reqOutChannels, ha = g_app->reqHostApi;
         JS_ToInt32(ctx, &sr, argv[0]);
         JS_ToInt32(ctx, &bs, argv[1]);
-        if (argc >= 3) { int c = 0; JS_ToInt32(ctx, &c, argv[2]); if (c >= 2 && c <= 8 && (c % 2) == 0) ch = c; }
+        if (argc >= 3) { int c = 0; JS_ToInt32(ctx, &c, argv[2]); if (c >= 2 && c <= 16 && (c % 2) == 0) ch = c; }
         if (argc >= 4) {
             const char* s = JS_ToCString(ctx, argv[3]);
             const std::string name = s ? s : "";
@@ -1156,7 +1156,7 @@ void loadAudioConfig(AppState& a) {
     const AudioCfgJson c = r.value();
     if (c.sampleRate > 0) a.reqSampleRate = c.sampleRate;
     if (c.blockSize > 0) a.reqBlockSize = c.blockSize;
-    if (c.outChannels >= 2 && c.outChannels <= 8 && (c.outChannels % 2) == 0) a.reqOutChannels = c.outChannels;
+    if (c.outChannels >= 2 && c.outChannels <= 16 && (c.outChannels % 2) == 0) a.reqOutChannels = c.outChannels;
     a.reqHostApi = c.hostApi; // -1 = Auto; any other value is a PaHostApiTypeId (openAudio validates it)
     a.reqOutputDevice = c.outputDevice; // resolved by name in openAudio; falls back to default if absent
     if (c.clockBpm >= MidiClockSync::kMinBpm && c.clockBpm <= MidiClockSync::kMaxBpm)

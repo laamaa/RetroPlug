@@ -155,8 +155,8 @@ protected:
     uint32_t    getVersion()     const noexcept override { return d_version(RETROPLUG_VERSION_MAJOR, RETROPLUG_VERSION_MINOR, RETROPLUG_VERSION_MICRO); }
     int64_t     getUniqueId()    const noexcept override { return d_cconst('R', 'P', 'g', 'f'); }
 
-    // --- audio ports: name the 8 outputs as four stereo pairs (out_1..4) + tag each with a port
-    // group so DAWs show Out 1..4 stereo pairs. Systems route to a pair per audioRouting. (Mirrors
+    // --- audio ports: name the 16 outputs as eight stereo pairs (out_1..8) + tag each with a port
+    // group so DAWs show Out 1..8 stereo pairs. Systems route to a pair per audioRouting. (Mirrors
     // the legacy plugin so tooling that links `out_N_l/r` works the same.) ---
     void initAudioPort(bool input, uint32_t index, AudioPort& port) override {
         if (input) { Plugin::initAudioPort(input, index, port); return; }

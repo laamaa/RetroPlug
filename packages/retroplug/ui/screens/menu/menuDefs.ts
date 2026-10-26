@@ -161,11 +161,11 @@ function isStandalone(): boolean {
 // proportionally more emulation per second, so a low-power device (the handheld) should stay at 48k or below.
 const AUDIO_RATES = [22050, 32000, 44100, 48000, 88200, 96000, 176400, 192000];
 const AUDIO_BLOCKS = [128, 256, 512, 1024, 2048, 4096];
-// Output device channels: 2 = stereo mix; 4/6/8 open that many device channels so the project's Audio
+// Output device channels: 2 = stereo mix; even counts up to 16 open that many device channels so the project's Audio
 // Routing (2-Ch/Inst, 1-Ch/Inst, Channels) fans real stems out to a multichannel interface. Labelled by
 // pair count since routing works in stereo pairs.
-const AUDIO_CHANNELS = [2, 4, 6, 8];
-const AUDIO_CHANNEL_NAMES = ["Stereo", "4 (2 pairs)", "6 (3 pairs)", "8 (4 pairs)"];
+const AUDIO_CHANNELS = [2, 4, 6, 8, 10, 12, 14, 16];
+const AUDIO_CHANNEL_NAMES = AUDIO_CHANNELS.map((n) => n === 2 ? "Stereo" : `${n} (${n / 2} pairs)`);
 
 /** How long one block of `frames` lasts at `rate`, for the Block Size row — the number that setting is
  *  really about (a block is a buffer's worth of audio, so it's the delay the size buys you). It is the
@@ -549,7 +549,7 @@ function n8MenuChildren(ctx: MenuContext, cfg: N8Config): MenuItem[] {
 
 // --- name tables (mirror the native enums, ported from legacy menuDefs.tsx) ---------------------------
 const MIDI_ROUTING_NAMES = ["Send to All", "4 Ch / Inst", "1 Ch / Inst", "Ch -> Inst"];
-// Indices 3..5 (channelSplit / pinSplit / stereoPinSplit) fan ONE system's channels across the 8 outputs,
+// Indices 3..5 (channelSplit / pinSplit / stereoPinSplit) fan ONE system's channels across the 16 plugin outputs,
 // so they're offered only for a single system — and the two pin rows only for a NES, the only console
 // with output pins to split (see validAudioRoutings). Native gates them the same way and is the
 // authority. "Channels" / "Pins" deliberately match the System > Render submenu's SPLIT_LABELS: same

@@ -2,15 +2,15 @@
 
 #include <cstdint>
 
-// How per-system audio fans out across the 8 plugin output channels. The
-// plugin always declares 8 outputs (DISTRHO_PLUGIN_NUM_OUTPUTS); modes
+// How per-system audio fans out across the 16 plugin output channels. The
+// plugin always declares 16 outputs (DISTRHO_PLUGIN_NUM_OUTPUTS); modes
 // pick which of those get written, the rest are zero.
-//   Stereo          all systems sum into outs 0/1; outs 2..7 silent.
-//   TwoPerInstance  system i writes to outs (2i % 8)/(2i % 8 + 1).
-//   OnePerInstance  system i writes a mono mix to out (i % 8).
+//   Stereo          all systems sum into outs 0/1; outs 2..15 silent.
+//   TwoPerInstance  system i writes to outs (2i % N)/(2i % N + 1).
+//   OnePerInstance  system i writes a mono mix to out (i % N).
 //   ChannelSplit    ONE system fans its per-channel streams across the outputs
 //                   (a Game Boy's 4 STEREO channels -> outs 0/1,2/3,4/5,6/7; a
-//                   NES's 5 MONO core channels -> outs 0..4).
+//                   NES's 5 MONO core channels + expansion voices -> outs 0..12).
 //   PinSplit        ONE NES fans its three 2A03 output-pin streams (Pulse | TND
 //                   | lumped Expansion) across outs 0..2, mono. NES-only — any
 //                   other single system falls back to Stereo.

@@ -30,6 +30,12 @@ protected:
 		_clockTimer--;
 		if(_clockTimer <= 0) {
 			int16_t output = OPLL_calc(_opll);
+			// This OPLL runs at its native clock/72 sample rate: ch_out is the exact signed
+			// per-voice summand used by OPLL_calc (no OPLL rate converter in this configuration).
+			if(_console->GetApu()->IsExpansionCaptureEnabled()) {
+				for(uint32_t ch = 0; ch < 6; ch++)
+					_console->GetApu()->CaptureExpansionOutput(AudioChannel::VRC7, ch, _muted ? 0 : _opll->ch_out[ch]);
+			}
 			_console->GetApu()->AddExpansionAudioDelta(AudioChannel::VRC7, _muted ? 0 : (output - _previousOutput));
 			_previousOutput = output;
 			_clockTimer = ((double)_console->GetMasterClockRate()) / Vrc7Audio::OpllSampleRate;

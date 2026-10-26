@@ -17,7 +17,7 @@ declare const __REPO_RESOURCES_DIR__: string;
 const NES = __REPO_RESOURCES_DIR__ + "/roms/bliptoaster.nes";
 // n8-midi: ch1→Pulse1, ch2→Pulse2, ch3→Triangle, ch4→Noise, ch5→DMC.
 const NOTES = [[0x90, 48, 127], [0x91, 55, 127], [0x92, 43, 127], [0x93, 60, 127], [0x94, 60, 127]];
-const NAMES = ["Pulse 1", "Pulse 2", "Triangle", "Noise", "DMC"];
+const NAMES = ["Pulse 1", "Pulse 2", "Triangle", "Noise", "DMC", "S5B Tone1", "S5B Tone2", "S5B Tone3"];
 
 test("audio levels: Mesen NES mix + core channels (n8-midi)", () => {
   const be = createRealBackend();
@@ -57,4 +57,6 @@ test("audio levels: Mesen NES mix + core channels (n8-midi)", () => {
   // loaded, so demanding it would make this fail for a reason that has nothing to do with the mixer.
   expect(mix, "the mix").toBeGreaterThan(AUDIBLE);
   NAMES.slice(0, 4).forEach((n, k) => expect(peaks[k], `${n} stem`).toBeGreaterThan(AUDIBLE));
+  expect(peaks.length).toBe(8);
+  peaks.slice(5).forEach((p) => expect(p, "unused S5B voice").toBeLessThan(AUDIBLE));
 });

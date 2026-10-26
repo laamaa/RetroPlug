@@ -163,9 +163,10 @@ private:
 			//and tone." So each half is OR'd with its own disable bit, and the two are AND'ed.
 			bool tone = !IsToneEnabled(i) || (_toneStep[i] < 0x08);
 			bool noise = !IsNoiseEnabled(i) || noiseOut;
-			if(tone && noise) {
-				summedOutput += GetAmplitude(i);
-			}
+			int16_t output = tone && noise ? GetAmplitude(i) : 0;
+			if(_console->GetApu()->IsExpansionCaptureEnabled())
+				_console->GetApu()->CaptureExpansionOutput(AudioChannel::Sunsoft5B, (uint32_t)i, output);
+			summedOutput += output;
 		}
 
 		_console->GetApu()->AddExpansionAudioDelta(AudioChannel::Sunsoft5B, summedOutput - _lastOutput);

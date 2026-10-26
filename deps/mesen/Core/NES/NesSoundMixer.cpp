@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "NES/NesSoundMixer.h"
 #include "NES/NesConsole.h"
+#include "NES/BaseMapper.h"
+#include "NES/APU/NesApu.h"
 #include "NES/NesConstants.h"
 #include "NES/NesTypes.h"
 #include "Shared/Emulator.h"
@@ -324,6 +326,9 @@ void NesSoundMixer::EndFrame(uint32_t time)
 			int16_t sv[MaxCaptureStreams] = {};
 			if(_captureMode == 3) {
 				GetCoreChannelLevels(sv);
+				if(_captureChip == AudioChannel::FDS && _captureStreams == 6) {
+					sv[5] = (int16_t)std::clamp(GetChannelOutput(AudioChannel::FDS, false) * 80, -32768.0, 32767.0);
+				}
 			} else {
 				uint16_t square, tnd;
 				int32_t expansion;
@@ -333,7 +338,10 @@ void NesSoundMixer::EndFrame(uint32_t time)
 				sv[2] = (int16_t)(expansion * 4);
 				sv[3] = currentOutput;  // reference (mode 2)
 			}
-			for(uint32_t k = 0; k < _captureStreams; k++) {
+			// Mapper voices feed their blips at the actual chip clock; only base channels (and FDS,
+			// whose single voice is already in _currentOutput) are emitted at these sorted timestamps.
+			uint32_t n = _captureMode == 3 && _captureChip != AudioChannel::FDS ? 5u : _captureStreams;
+			for(uint32_t k = 0; k < n; k++) {
 				blip_add_delta(_streamBlip[k], stamp, (int)(sv[k] - _streamPrev[k]));
 				_streamPrev[k] = sv[k];
 			}
@@ -389,8 +397,33 @@ void NesSoundMixer::CaptureStreams()
 
 void NesSoundMixer::SetChannelCapture(uint32_t mode, uint32_t hostRate)
 {
-	// Stream count per mode: 1 pins → 3, 2 pins+ref → 4, 3 individual-mono → 5, else off.
-	const uint32_t want = mode == 1 ? 3u : mode == 2 ? 4u : mode == 3 ? 5u : 0u;
+	// Resolve once per routing/rate change; never change the layout when a voice is disabled.
+	_expansionNames.clear();
+	_expansionScale = 0;
+	_captureChip = AudioChannel::FDS;
+	if(mode == 3) {
+		auto mapper = _console->GetMapper();
+		const string chip = mapper->GetExpansionAudioState().chip;
+		if(chip == "vrc6") {
+			_captureChip = AudioChannel::VRC6; _expansionScale = 20;
+			_expansionNames = {"VRC6 Pulse1", "VRC6 Pulse2", "VRC6 Saw"};
+		} else if(chip == "mmc5") {
+			_captureChip = AudioChannel::MMC5; _expansionScale = 172;
+			_expansionNames = {"MMC5 Pulse1", "MMC5 Pulse2", "MMC5 PCM"};
+		} else if(chip == "vrc7") {
+			_captureChip = AudioChannel::VRC7; _expansionScale = 4;
+			for(int i = 1; i <= 6; i++) _expansionNames.push_back("VRC7 FM" + std::to_string(i));
+		} else if(chip == "s5b") {
+			_captureChip = AudioChannel::Sunsoft5B; _expansionScale = 60;
+			for(int i = 1; i <= 3; i++) _expansionNames.push_back("S5B Tone" + std::to_string(i));
+		} else if(chip == "n163") {
+			_captureChip = AudioChannel::Namco163; _expansionScale = 80;
+			for(int i = 1; i <= 8; i++) _expansionNames.push_back("N163 Wave" + std::to_string(i));
+		} else if(chip == "fds") {
+			_expansionNames = {"FDS Wave"};
+		}
+	}
+	const uint32_t want = mode == 1 ? 3u : mode == 2 ? 4u : mode == 3 ? 5u + (uint32_t)_expansionNames.size() : 0u;
 	_captureMode = want > 0 ? mode : 0u;
 	// Free any streams no longer wanted (e.g. re-arming with fewer streams).
 	for(uint32_t k = want; k < MaxCaptureStreams; k++) {
@@ -401,6 +434,7 @@ void NesSoundMixer::SetChannelCapture(uint32_t mode, uint32_t hostRate)
 		_streamBuf[k].clear();
 	}
 	_captureStreams = want;
+	_console->GetApu()->SetExpansionCaptureEnabled(mode == 3 && _captureChip != AudioChannel::FDS);
 	if(want > 0) {
 		_captureHostRate = hostRate;
 		for(uint32_t k = 0; k < want; k++) {
@@ -441,3 +475,17 @@ uint32_t NesSoundMixer::DrainChannel(uint32_t stream, float* dest, uint32_t fram
 	return take;
 }
 
+
+void NesSoundMixer::CaptureExpansionOutput(AudioChannel chip, uint32_t voice, uint32_t time, double output)
+{
+	if(_captureMode != 3 || chip != _captureChip || voice >= _expansionNames.size()) return;
+	const uint32_t k = 5 + voice;
+	// Same chip gain, polarity and expansion-volume control as the mixed path. Clamp before casting:
+	// an amplified isolated voice must not wrap to the opposite polarity.
+	double level = output * _expansionScale * _volumes[(int)chip] * (2.0 - _panning[(int)chip]);
+	int16_t value = (int16_t)std::clamp(level, -32768.0, 32767.0);
+	if(value != _streamPrev[k]) {
+		blip_add_delta(_streamBlip[k], time, (int)value - _streamPrev[k]);
+		_streamPrev[k] = value;
+	}
+}

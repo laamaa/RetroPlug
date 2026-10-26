@@ -15,7 +15,7 @@ import { native } from "../../host/nativeHooks";
 export interface AudioCfg {
   sampleRate: number;
   blockSize: number;
-  outChannels: number; // 2 = stereo mix; 4/6/8 = wide stems for a multichannel device (per audioRouting)
+  outChannels: number; // 2 = stereo mix; 4..16 = wide stems for a multichannel device (per audioRouting)
   driver: string; // audio host API: "Auto" (PipeWire-preferred default) or a name from getAudioDrivers()
   device: string; // output device within the driver: "" (the host API default) or a name from getAudioDevices()
 }

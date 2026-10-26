@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -30,6 +31,7 @@
 #include "host/engine/Engine.hpp"
 #include "system/AudioRouting.hpp"
 #include "system/SystemBase.hpp"
+#include "system/DebugTarget.hpp"
 #include "system/mesen/MesenNesConfig.hpp"
 #include "system/mesen/MesenNesSystem.hpp"
 #include "transport/MidiTypes.hpp"
@@ -45,8 +47,8 @@ constexpr std::uint32_t kFrames     = 512;
 constexpr int           kBootBlocks = 90;   // ~1 s: boot + FIFO init before the note takes
 constexpr int           kPlayBlocks = 60;   // ~0.6 s of held note to measure
 
-std::vector<std::uint8_t> readRom() {
-    std::FILE* f = std::fopen(RP_BLIPTOASTER_ROM_PATH, "rb");
+std::vector<std::uint8_t> readRom(const std::string& path) {
+    std::FILE* f = std::fopen(path.c_str(), "rb");
     REQUIRE(f != nullptr);
     std::fseek(f, 0, SEEK_END);
     const long n = std::ftell(f);
@@ -60,10 +62,10 @@ std::vector<std::uint8_t> readRom() {
 
 // A booted NES, adopted the way a host adopts one: constructed with the DEFAULT (Mix) export mode, so
 // anything per-channel the Engine later reports had to be armed live.
-std::unique_ptr<MesenNesSystem> buildNes(SystemId id) {
+std::unique_ptr<MesenNesSystem> buildNes(SystemId id, const std::string& path = RP_BLIPTOASTER_ROM_PATH) {
     MesenNesConfig cfg;
-    cfg.romPath = RP_BLIPTOASTER_ROM_PATH;
-    auto sys = std::make_unique<MesenNesSystem>(id, cfg, readRom());
+    cfg.romPath = path;
+    auto sys = std::make_unique<MesenNesSystem>(id, cfg, readRom(path));
     sys->onActivate(kSampleRate);
     REQUIRE(sys->activated());
     REQUIRE(sys->channelExportMode() == 0);  // constructed as a plain Mix system
@@ -84,10 +86,10 @@ std::unique_ptr<MesenNesSystem> buildNes(SystemId id) {
 // biggest sample-level divergence within each stereo PAIR (0 => the pair's two lanes are identical,
 // which is what "the mono stem was mirrored across the pair" means).
 struct Lanes {
-    std::array<std::vector<float>, 8> buf;
-    std::array<float*, 8>             ptr{};
-    std::array<float, 8>              peak{};
-    std::array<float, 4>              pairDiff{};
+    std::array<std::vector<float>, 16> buf;
+    std::array<float*, 16>             ptr{};
+    std::array<float, 16>              peak{};
+    std::array<float, 8>              pairDiff{};
 
     Lanes() {
         for (std::size_t i = 0; i < buf.size(); ++i) {
@@ -108,10 +110,11 @@ struct Lanes {
 // Boot the core, then hold a note for kPlayBlocks, tracking each lane's peak over the held section only.
 // The note is re-sent periodically so the measurement doesn't hinge on the ROM sustaining, and primed
 // near the end of boot because bliptoaster drops its first MIDI message.
-void driveAndMeasure(Engine& eng, SystemId id, Lanes& lanes, std::size_t numOutputs) {
+void driveAndMeasure(Engine& eng, SystemId id, Lanes& lanes, std::size_t numOutputs, std::uint8_t channel = 0) {
     SystemBase* sys = eng.findSystem(id);
     REQUIRE(sys != nullptr);
     ::MidiEvent note = noteOnCh1();
+    note.data[0] |= channel;
 
     for (int b = 0; b < kBootBlocks; ++b) {
         if (b >= kBootBlocks - 2) sys->onMidi(&note, 1);
@@ -208,7 +211,7 @@ TEST_CASE("Engine ChannelSplit on a real NES fans 5 mono core channels across ou
     auto* nes = dynamic_cast<MesenNesSystem*>(eng.findSystem(1));
     REQUIRE(nes != nullptr);
     CHECK(nes->channelExportMode() == 3);           // IndividualMono
-    CHECK(nes->channelLayout().size() == 5);        // Square1 | Square2 | Triangle | Noise | DMC
+    CHECK(nes->channelLayout().size() == 8);        // five base voices + three idle S5B voices
 
     Lanes lanes;
     driveAndMeasure(eng, 1, lanes, 8);
@@ -218,6 +221,44 @@ TEST_CASE("Engine ChannelSplit on a real NES fans 5 mono core channels across ou
     CHECK(lanes.peak[0] > kSignal);
     for (int L = 5; L < 8; ++L)
         CHECK(lanes.peak[L] == 0.0f);
+}
+
+TEST_CASE("Engine routes all six VRC7 voices through 16 outputs and restores the mix on a narrow host",
+          "[audio][channelsplit][nes][expansion]") {
+    std::string path = RP_BLIPTOASTER_ROM_PATH;
+    path.replace(path.size() - 4, 4, "-vrc7.nes");
+    Engine eng(kSampleRate);
+    eng.adoptSystem(buildNes(1, path));
+    eng.setAudioRouting(AudioRouting::ChannelSplit);
+    REQUIRE(eng.findSystem(1)->channelLayout().size() == 11);
+
+    Lanes lanes;
+    driveAndMeasure(eng, 1, lanes, 16, 10); // MIDI channel 11 = sixth VRC7 voice, output 11
+    CHECK(lanes.peak[10] > kSignal);
+    for (std::size_t i = 0; i < lanes.peak.size(); ++i)
+        if (i != 10) CHECK(lanes.peak[i] < kSignal);
+
+    auto* nes = dynamic_cast<MesenNesSystem*>(eng.findSystem(1));
+    REQUIRE(nes != nullptr);
+    const auto state = nes->saveStateBytes();
+    REQUIRE_FALSE(state.empty());
+    REQUIRE(nes->loadStateBytes(state));
+    eng.setSampleRate(96000.0);
+    driveAndMeasure(eng, 1, lanes, 16, 10);
+    CHECK(lanes.peak[10] > kSignal);
+    CHECK(nes->channelLayout().size() == 11);
+
+    // A host offering fewer than eleven outputs gets the ordinary mix, never truncated stems.
+    driveAndMeasure(eng, 1, lanes, 8, 10);
+    CHECK(lanes.peak[0] > kSignal);
+    CHECK(lanes.peak[1] > kSignal);
+    for (int i = 2; i < 8; ++i) CHECK(lanes.peak[i] == 0.0f);
+
+    eng.setAudioRouting(AudioRouting::StereoPinSplit);
+    driveAndMeasure(eng, 1, lanes, 16, 10);
+    CHECK(lanes.peak[4] > kSignal);
+    CHECK(lanes.pairDiff[2] == 0.0f);
+    for (std::size_t i = 6; i < lanes.peak.size(); ++i) CHECK(lanes.peak[i] == 0.0f);
 }
 
 TEST_CASE("Leaving a split routing restores the NES tap and the plain stereo mix",
@@ -244,6 +285,52 @@ TEST_CASE("Leaving a split routing restores the NES tap and the plain stereo mix
     CHECK(lanes.peak[0] > kSignal);
     for (int L = 2; L < 8; ++L)
         CHECK(lanes.peak[L] == 0.0f);
+}
+
+TEST_CASE("FDS Channels exposes its single wave voice after the five base voices",
+          "[audio][channelsplit][nes][expansion]") {
+    // Synthetic disk + RAM-resident audio program; this exercises FDS sound without copyrighted BIOS
+    // code or a disk game's boot sequence. The mapper can run with its empty BIOS fallback.
+    std::vector<std::uint8_t> disk(16 + 65500, 0);
+    disk[0] = 'F'; disk[1] = 'D'; disk[2] = 'S'; disk[3] = 0x1a; disk[4] = 1;
+    disk[16] = 1;
+    const std::string signature = "*NINTENDO-HVC*";
+    std::copy(signature.begin(), signature.end(), disk.begin() + 17);
+    MesenNesConfig cfg;
+    cfg.romPath = "synthetic.fds";
+    auto sys = std::make_unique<MesenNesSystem>(1, cfg, disk);
+    sys->onActivate(kSampleRate);
+    REQUIRE(sys->activated());
+    auto* nes = sys.get();
+    Engine eng(kSampleRate);
+    eng.adoptSystem(std::move(sys));
+    eng.setAudioRouting(AudioRouting::ChannelSplit);
+    REQUIRE(nes->channelLayout().size() == 6);
+    CHECK(nes->channelLayout()[5].name == "FDS Wave");
+    CHECK(nes->debugTarget()->getExpansionAudioState().chip == "fds");
+
+    std::vector<std::uint8_t> code{0x78}; // SEI
+    const auto write = [&code](std::uint16_t addr, std::uint8_t value) {
+        code.insert(code.end(), {0xa9, value, 0x8d, static_cast<std::uint8_t>(addr), static_cast<std::uint8_t>(addr >> 8)});
+    };
+    write(0x4015, 0); write(0x4023, 2); write(0x4089, 0x80);
+    for (std::uint16_t i = 0; i < 64; ++i) write(0x4040 + i, i < 32 ? 0 : 63);
+    write(0x4089, 0); write(0x4080, 0xa0); write(0x4082, 0xa0); write(0x4083, 0); write(0x4087, 0x80);
+    const auto idle = static_cast<std::uint16_t>(0x200 + code.size());
+    code.insert(code.end(), {0x4c, static_cast<std::uint8_t>(idle), static_cast<std::uint8_t>(idle >> 8)});
+    for (std::size_t i = 0; i < code.size(); ++i)
+        REQUIRE(nes->writeCpuByte(static_cast<std::uint32_t>(0x200 + i), code[i]));
+    REQUIRE(nes->setCpuRegister("pc", 0x200));
+
+    Lanes lanes;
+    for (int b = 0; b < kBootBlocks; ++b) eng.processBlock(kFrames, lanes.ptr.data(), 16);
+    for (int b = 0; b < kPlayBlocks; ++b) {
+        eng.processBlock(kFrames, lanes.ptr.data(), 16);
+        lanes.accumulatePeaks();
+    }
+    CHECK(lanes.peak[5] > kSignal);
+    for (std::size_t i = 0; i < lanes.peak.size(); ++i)
+        if (i != 5) CHECK(lanes.peak[i] < kSignal);
 }
 
 TEST_CASE("A second system disarms the NES tap and falls back to the per-instance router",

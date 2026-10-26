@@ -48,7 +48,8 @@ runSession((s) => {
   NOTES.forEach((m) => s.audio.stageMidiIn(m));
   NOTES.forEach((m) => s.audio.stageMidiIn(m));
 
-  const bufs = s.audio.renderAudioPerChannel(id, 2000); // 5 interleaved-stereo buffers (mono: R silent)
+  // This example exports the base APU only; `render --split channels` includes expansion voices.
+  const bufs = s.audio.renderAudioPerChannel(id, 2000).slice(0, 5);
   if (bufs.length !== 5) throw new Error(`expected 5 NES core streams, got ${bufs.length}`);
   const sr = s.audio.sampleRate();
 

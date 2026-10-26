@@ -35,6 +35,12 @@ protected:
 			_saw.Clock();
 		}
 
+		auto apu = _console->GetApu();
+		if(apu->IsExpansionCaptureEnabled()) {
+			apu->CaptureExpansionOutput(AudioChannel::VRC6, 0, _pulse1.GetVolume() * 15);
+			apu->CaptureExpansionOutput(AudioChannel::VRC6, 1, _pulse2.GetVolume() * 15);
+			apu->CaptureExpansionOutput(AudioChannel::VRC6, 2, _saw.GetVolume() * 15);
+		}
 		int32_t outputLevel = _pulse1.GetVolume() + _pulse2.GetVolume() + _saw.GetVolume();
 		_console->GetApu()->AddExpansionAudioDelta(AudioChannel::VRC6, (outputLevel - _lastOutput) * 15);
 		_lastOutput = outputLevel;

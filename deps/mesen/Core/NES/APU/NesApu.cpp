@@ -304,3 +304,8 @@ ApuState NesApu::GetState()
 	state.Triangle = _triangle->GetState();
 	return state;
 }
+
+void NesApu::CaptureExpansionOutput(AudioChannel chip, uint32_t voice, double output)
+{
+	_mixer->CaptureExpansionOutput(chip, voice, _currentCycle, output);
+}

@@ -620,3 +620,8 @@ vector<MapperStateEntry> Fds::GetMapperStateEntries()
 
 	return entries;
 }
+
+NesExpansionAudioState Fds::GetExpansionAudioState()
+{
+	return _audio->GetState();
+}
